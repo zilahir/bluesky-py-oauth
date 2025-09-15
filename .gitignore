@@ -12,3 +12,6 @@ wheels/
 # more
 .env
 *.sqlite
+
+# macOS
+.DS_Store
