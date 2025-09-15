@@ -1,19 +1,16 @@
 import json
+import pathlib
 import sqlite3
-import functools
 from datetime import datetime, timezone
-from urllib.parse import urlencode, quote
-from flask import (
-    Flask,
-    flash,
-    redirect,
-    render_template,
-    jsonify,
-    request,
-    g,
-    session,
-    abort,
-)
+from urllib.parse import urlencode
+from fastapi import FastAPI, Request, Depends, HTTPException, Form, status
+from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
+from fastapi.exceptions import RequestValidationError
+from starlette.middleware.sessions import SessionMiddleware
+from starlette.config import Config
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from authlib.jose import JsonWebKey
 
 from atproto_identity import (
@@ -33,110 +30,128 @@ from atproto_oauth import (
 from atproto_security import is_safe_url
 from oauth_metadata import OauthMetadata
 
-app = Flask(__name__)
+app = FastAPI()
 
-app.config.from_prefixed_env()
+config = Config(".env")
+
+pwd = pathlib.Path(__file__).parent
+app.mount("/static", StaticFiles(directory=pwd / "static"), name="static")
+
+app.add_middleware(
+    SessionMiddleware, secret_key=config("SECRET_KEY", default="dev-secret-key")
+)
+
+templates = Jinja2Templates(directory="templates")
 
 
 # This is a "confidential" OAuth client, meaning it has access to a persistent secret signing key. parse that key as a global.
-CLIENT_SECRET_JWK = JsonWebKey.import_key(app.config["CLIENT_SECRET_JWK"])
+CLIENT_SECRET_JWK = JsonWebKey.import_key(json.loads(config("CLIENT_SECRET_JWK")))
 CLIENT_PUB_JWK = json.loads(CLIENT_SECRET_JWK.as_json(is_private=False))
+
 # Defensively check that the public JWK is really public and didn't somehow end up with secret cryptographic key info
 assert "d" not in CLIENT_PUB_JWK
 
 
 # Helpers for managing database connection.
-# Note that you could use a sqlite ":memory:" database instead. In that case you would want to have a global sqlite connection, instead of re-connecting per connection. This file-based setup is following the Flask docs/tutorial.
+# Note that you could use a sqlite ":memory:" database instead. In that case you would want to have a global sqlite connection, instead of re-connecting per connection.
 def get_db():
-    db = getattr(g, "_database", None)
-    if db is None:
-        db_path = app.config.get("DATABASE_URL", "demo.sqlite")
-        db = g._database = sqlite3.connect(db_path)
-        db.row_factory = sqlite3.Row
-    return db
-
-
-@app.teardown_appcontext
-def close_connection(exception):
-    db = getattr(g, "_database", None)
-    if db is not None:
+    db_path = config("DATABASE_URL", default="demo.sqlite")
+    db = sqlite3.connect(db_path)
+    db.row_factory = sqlite3.Row
+    try:
+        yield db
+    finally:
         db.close()
 
 
-def query_db(query, args=(), one=False):
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(query, args)
-    rv = cur.fetchall()
-    conn.commit()
-    cur.close()
-    return (rv[0] if rv else None) if one else rv
+def query_db(query, args=(), one=False, db=None):
+    if db is None:
+        db_path = config("DATABASE_URL", default="demo.sqlite")
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        should_close = True
+    else:
+        conn = db
+        should_close = False
+
+    try:
+        cur = conn.cursor()
+        cur.execute(query, args)
+        rv = cur.fetchall()
+        conn.commit()
+        cur.close()
+        return (rv[0] if rv else None) if one else rv
+    finally:
+        if should_close:
+            conn.close()
 
 
 def init_db():
     print("initializing database...")
-    with app.app_context():
-        db = get_db()
-        with app.open_resource("schema.sql", mode="r") as f:
+    db_path = config("DATABASE_URL", default="demo.sqlite")
+    db = sqlite3.connect(db_path)
+    db.row_factory = sqlite3.Row
+    try:
+        with open("schema.sql", "r") as f:
             db.cursor().executescript(f.read())
         db.commit()
+    finally:
+        db.close()
 
 
 init_db()
 
 
 # Load back-end account auth metadata when there is a valid front-end session cookie
-# NOTE: Flask uses encrypted cookies for sessions. If the SECRET_KEY config variable isn't provided, Flask will error out when trying to use the session.
-@app.before_request
-def load_logged_in_user():
-    user_did = session.get("user_did")
+def get_current_user(request: Request):
+    user_did = request.session.get("user_did")
 
     if user_did is None:
-        g.user = None
+        return None
     else:
-        g.user = (
-            get_db()
-            .execute("SELECT * FROM oauth_session WHERE did = ?", (user_did,))
-            .fetchone()
+        return query_db(
+            "SELECT * FROM oauth_session WHERE did = ?", (user_did,), one=True
         )
 
 
-def login_required(view):
-    @functools.wraps(view)
-    def wrapped_view(**kwargs):
-        if g.user is None:
-            return redirect("/oauth/login")
-
-        return view(**kwargs)
-
-    return wrapped_view
+def get_logged_in_user(request: Request):
+    user = get_current_user(request)
+    print(f"get_logged_in_user: {user}")
+    if user:
+        return user
+    else:
+        print("No user session found, redirecting to login")
+        raise HTTPException(
+            status_code=status.HTTP_303_SEE_OTHER,
+            headers={"Location": f"{request.url_for('oauth_login')}"},
+        )
 
 
 # Actual web routes start here!
-@app.route("/")
-def homepage():
-    return render_template("home.html")
+@app.get("/", response_class=HTMLResponse)
+def homepage(request: Request):
+    return templates.TemplateResponse("home.html", {"request": request})
 
 
-@app.route("/health")
+@app.get("/health")
 def health_check():
-    return jsonify(
+    return JSONResponse(
         {
-            "env": app.config.get("ENV", "unknown"),
+            "env": config("ENV", default="unknown"),
         }
     )
 
 
 # Every atproto OAuth client must have a public client metadata JSON document. It does not need to be at this specific path. The full URL to this file is the "client_id" of the app.
 # This implementation dynamically uses the HTTP request Host name to infer the "client_id".
-@app.route("/oauth/client-metadata.json")
+@app.get("/oauth/client-metadata.json")
 def oauth_client_metadata():
-    env = app.config.get("ENV", "unknown")
+    env = config("ENV", default="unknown")
 
     oauth_metadata = OauthMetadata(env)
     ouath_config = oauth_metadata.get_config()
 
-    return jsonify(ouath_config)
+    return JSONResponse(ouath_config)
 
     # return jsonify(
     #     {
@@ -161,9 +176,9 @@ def oauth_client_metadata():
 
 
 # In this example of a "confidential" OAuth client, we have only a single app key being used. In a production-grade client, it best practice to periodically rotate keys. Including both a "new key" and "old key" at the same time can make this process smoother.
-@app.route("/oauth/jwks.json")
+@app.get("/oauth/jwks.json")
 def oauth_jwks():
-    return jsonify(
+    return JSONResponse(
         {
             "keys": [CLIENT_PUB_JWK],
         }
@@ -171,13 +186,14 @@ def oauth_jwks():
 
 
 # Displays the login form (GET), or starts the OAuth authorization flow (POST).
-@app.route("/oauth/login", methods=("GET", "POST"))
-def oauth_login():
-    if request.method != "POST":
-        return render_template("login.html")
+@app.get("/oauth/login", response_class=HTMLResponse, name="oauth_login")
+def oauth_login_form(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
 
+
+@app.post("/oauth/login")
+def oauth_login_submit(request: Request, username: str = Form(...)):
     # Login can start with a handle, DID, or auth server URL. We are calling whatever the user supplied the "username".
-    username = request.form["username"]
     if is_valid_handle(username) or is_valid_did(username):
         # If starting with an account identifier, resolve the identity (bi-directionally), fetch the PDS URL, and resolve to the Authorization Server URL
         login_hint = username
@@ -196,8 +212,10 @@ def oauth_login():
         except Exception:
             authserver_url = initial_url
     else:
-        flash("Not a valid handle, DID, or auth server URL")
-        return render_template("login.html"), 400
+        request.session["flash_message"] = "Not a valid handle, DID, or auth server URL"
+        return templates.TemplateResponse(
+            "login.html", {"request": request}, status_code=400
+        )
 
     # Fetch Auth Server metadata. For a self-hosted PDS, this will be the same server (the PDS). For large-scale PDS hosts like Bluesky, this may be a separate "entryway" server filling the Auth Server role.
     # IMPORTANT: Authorization Server URL is untrusted input, SSRF mitigations are needed
@@ -208,13 +226,17 @@ def oauth_login():
     except Exception as err:
         print(f"failed to fetch auth server metadata: {err}")
         # raise err
-        flash("Failed to fetch Auth Server (Entryway) OAuth metadata")
-        return render_template("login.html"), 400
+        request.session["flash_message"] = (
+            "Failed to fetch Auth Server (Entryway) OAuth metadata"
+        )
+        return templates.TemplateResponse(
+            "login.html", {"request": request}, status_code=400
+        )
 
     # Generate DPoP private signing key for this account session. In theory this could be defered until the token request at the end of the athentication flow, but doing it now allows early binding during the PAR request.
     dpop_private_jwk = JsonWebKey.generate_key("EC", "P-256", is_private=True)
 
-    oauth_config = OauthMetadata(app.config.get("ENV", "unknown"))
+    oauth_config = OauthMetadata(config("ENV", default="unknown"))
     oauth_meta = oauth_config.get_config()
 
     # OAuth scopes requested by this app
@@ -222,7 +244,7 @@ def oauth_login():
     scope = oauth_meta["scope"]
 
     # Dynamically compute our "client_id" based on the request HTTP Host
-    app_url = request.url_root.replace("http://", "https://")
+    app_url = str(request.url).replace("http://", "https://").rstrip("/oauth/login")
     # redirect_uri = f"{app_url}oauth/callback"
     # client_id = f"{app_url}oauth/client-metadata.json"
 
@@ -268,15 +290,14 @@ def oauth_login():
     auth_url = authserver_meta["authorization_endpoint"]
     assert is_safe_url(auth_url)
     qparam = urlencode({"client_id": client_id, "request_uri": par_request_uri})
-    return redirect(f"{auth_url}?{qparam}")
+    return RedirectResponse(url=f"{auth_url}?{qparam}", status_code=303)
 
 
 # Endpoint for receiving "callback" responses from the Authorization Server, to complete the auth flow.
-@app.route("/oauth/callback")
-def oauth_callback():
-    state = request.args["state"]
-    authserver_iss = request.args["iss"]
-    authorization_code = request.args["code"]
+@app.get("/oauth/callback")
+def oauth_callback(request: Request, state: str, iss: str, code: str):
+    authserver_iss = iss
+    authorization_code = code
 
     # Lookup auth request by the "state" token (which we randomly generated earlier)
     row = query_db(
@@ -285,7 +306,7 @@ def oauth_callback():
         one=True,
     )
     if row is None:
-        abort(400, "OAuth request not found")
+        raise HTTPException(status_code=400, detail="OAuth request not found")
 
     # Delete row to prevent response replay
     query_db("DELETE FROM oauth_auth_request WHERE state = ?;", [state])
@@ -296,7 +317,9 @@ def oauth_callback():
     assert row["state"] == state
 
     # Complete the auth flow by requesting auth tokens from the authorization server.
-    app_url = request.url_root.replace("http://", "https://")
+    app_url = (
+        str(request.url).replace("http://", "https://").split("/oauth/callback")[0]
+    )
     tokens, dpop_authserver_nonce = initial_token_request(
         row,
         authorization_code,
@@ -340,22 +363,21 @@ def oauth_callback():
     )
 
     # Set a (secure) session cookie in the user's browser, for authentication between the browser and this app
-    session["user_did"] = did
+    request.session["user_did"] = did
     # Note that the handle might change over time, and should be re-resolved periodically in a real app
-    session["user_handle"] = handle
+    request.session["user_handle"] = handle
 
-    return redirect("/bsky/post")
+    return RedirectResponse(url="/bsky/post")
 
 
 # Example endpoint demonstrating manual refreshing of auth token.
 # This isn't something you would do in a real application, it is just to trigger this codepath.
-@login_required
-@app.route("/oauth/refresh")
-def oauth_refresh():
-    app_url = request.url_root.replace("http://", "https://")
+@app.get("/oauth/refresh")
+def oauth_refresh(request: Request, user=Depends(get_logged_in_user)):
+    app_url = str(request.url).replace("http://", "https://").split("/oauth/refresh")[0]
 
     tokens, dpop_authserver_nonce = refresh_token_request(
-        g.user, app_url, CLIENT_SECRET_JWK
+        user, app_url, CLIENT_SECRET_JWK
     )
 
     # persist updated tokens (and DPoP nonce) to database
@@ -365,56 +387,94 @@ def oauth_refresh():
             tokens["access_token"],
             tokens["refresh_token"],
             dpop_authserver_nonce,
-            g.user["did"],
+            user["did"],
         ],
     )
 
-    flash("Token refreshed!")
-    return redirect("/")
+    request.session["flash_message"] = "Token refreshed!"
+    return RedirectResponse(url="/")
 
 
-@login_required
-@app.route("/oauth/logout")
-def oauth_logout():
-    query_db("DELETE FROM oauth_session WHERE did = ?;", [g.user["did"]])
-    session.clear()
-    return redirect("/")
+@app.get("/oauth/logout")
+def oauth_logout(request: Request, user=Depends(get_logged_in_user)):
+    # TODO: check for user.did
+    query_db("DELETE FROM oauth_session WHERE did = ?;", [user["did"]])
+    request.session.clear()
+    return RedirectResponse(url="/")
 
 
 # Example form endpoint demonstrating making an authenticated request to the logged-in user's PDS to create a repository record.
-@login_required
-@app.route("/bsky/post", methods=("GET", "POST"))
-def bsky_post():
-    if request.method != "POST":
-        return render_template("bsky_post.html")
+@app.get("/bsky/post", response_class=HTMLResponse, name="bsky_post")
+def bsky_post_form(request: Request, user=Depends(get_logged_in_user)):
+    return templates.TemplateResponse(
+        "bsky_post.html",
+        {
+            "request": request,
+            "user": user,
+        },
+    )
 
-    pds_url = g.user["pds_url"]
+
+@app.post("/bsky/post")
+def bsky_post_submit(
+    request: Request, post_text: str = Form(...), user=Depends(get_logged_in_user)
+):
+    pds_url = user["pds_url"]
     req_url = f"{pds_url}/xrpc/com.atproto.repo.createRecord"
 
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     body = {
-        "repo": g.user["did"],
+        "repo": user["did"],
         "collection": "app.bsky.feed.post",
         "record": {
             "$type": "app.bsky.feed.post",
-            "text": request.form["post_text"],
+            "text": post_text,
             "createdAt": now,
         },
     }
-    resp = pds_authed_req("POST", req_url, body=body, user=g.user, db=get_db())
-    if resp.status_code not in [200, 201]:
-        print(f"PDS HTTP Error: {resp.json()}")
-    resp.raise_for_status()
 
-    flash("Post record created in PDS!")
-    return render_template("bsky_post.html")
+    # We need to get a database connection for pds_authed_req
+    db_path = config("DATABASE_URL", default="demo.sqlite")
+    db = sqlite3.connect(db_path)
+    db.row_factory = sqlite3.Row
+    try:
+        resp = pds_authed_req("POST", req_url, body=body, user=user, db=db)
+        if resp.status_code not in [200, 201]:
+            print(f"PDS HTTP Error: {resp.json()}")
+        resp.raise_for_status()
+
+        request.session["flash_message"] = "Post record created in PDS!"
+        return templates.TemplateResponse("bsky_post.html", {"request": request})
+    finally:
+        db.close()
 
 
-@app.errorhandler(500)
-def internal_server_error(e):
-    return render_template("error.html", status_code=500, err=e), 500
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    if exc.status_code == 500:
+        return templates.TemplateResponse(
+            "error.html",
+            {"request": request, "status_code": 500, "err": exc},
+            status_code=500,
+        )
+    elif exc.status_code == 400:
+        return templates.TemplateResponse(
+            "error.html",
+            {"request": request, "status_code": 400, "err": exc},
+            status_code=400,
+        )
+    else:
+        return templates.TemplateResponse(
+            "error.html",
+            {"request": request, "status_code": exc.status_code, "err": exc},
+            status_code=exc.status_code,
+        )
 
 
-@app.errorhandler(400)
-def bad_request_error(e):
-    return render_template("error.html", status_code=400, err=e), 400
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return templates.TemplateResponse(
+        "error.html",
+        {"request": request, "status_code": 400, "err": exc},
+        status_code=400,
+    )
