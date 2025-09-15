@@ -121,10 +121,7 @@ def get_logged_in_user(request: Request):
         return user
     else:
         print("No user session found, redirecting to login")
-        raise HTTPException(
-            status_code=status.HTTP_303_SEE_OTHER,
-            headers={"Location": f"{request.url_for('oauth_login')}"},
-        )
+        raise HTTPException(status_code=401, detail="Authentication required")
 
 
 # Actual web routes start here!
@@ -449,9 +446,23 @@ def bsky_post_submit(
         db.close()
 
 
+@app.exception_handler(HTTPException)
+async def fastapi_http_exception_handler(request: Request, exc: HTTPException):
+    if exc.status_code == 401:
+        return RedirectResponse(url=request.url_for('oauth_login'), status_code=303)
+    else:
+        return templates.TemplateResponse(
+            "error.html",
+            {"request": request, "status_code": exc.status_code, "err": exc},
+            status_code=exc.status_code,
+        )
+
+
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    if exc.status_code == 500:
+    if exc.status_code == 401:
+        return RedirectResponse(url=request.url_for('oauth_login'), status_code=303)
+    elif exc.status_code == 500:
         return templates.TemplateResponse(
             "error.html",
             {"request": request, "status_code": 500, "err": exc},
