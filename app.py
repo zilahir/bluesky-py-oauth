@@ -35,8 +35,8 @@ from oauth_metadata import OauthMetadata
 
 app = Flask(__name__)
 
-# Load this configuration from environment variables (which might mean a .env "dotenv" file)
 app.config.from_prefixed_env()
+
 
 # This is a "confidential" OAuth client, meaning it has access to a persistent secret signing key. parse that key as a global.
 CLIENT_SECRET_JWK = JsonWebKey.import_key(app.config["CLIENT_SECRET_JWK"])
