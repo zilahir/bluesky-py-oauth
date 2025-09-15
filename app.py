@@ -31,6 +31,7 @@ from atproto_oauth import (
     fetch_authserver_meta,
 )
 from atproto_security import is_safe_url
+from oauth_metadata import OauthMetadata
 
 app = Flask(__name__)
 
@@ -130,68 +131,33 @@ def health_check():
 # This implementation dynamically uses the HTTP request Host name to infer the "client_id".
 @app.route("/oauth/client-metadata.json")
 def oauth_client_metadata():
-    app_url = request.url_root.replace("http://", "https://")
-    client_id = f"{app_url}oauth/client-metadata.json"
-
-    def abs_path(s: str) -> str:
-        return f"{ORIGIN}/{s}"
-
     env = app.config.get("ENV", "unknown")
-    # is_dev = env in ["development", "test"]
-    is_dev = False
 
-    ORIGIN = "http://127.0.0.1:5000" if is_dev else app_url
+    oauth_metadata = OauthMetadata(env)
+    ouath_config = oauth_metadata.get_config()
 
-    SCOPE = "atproto transition:generic"
-    REDIRECT_URI = abs_path("oauth/callback")
+    return jsonify(ouath_config)
 
-    if is_dev:
-        config = {
-            "client_name": "Project Name",
-            "client_id": (
-                f"http://localhost?"
-                f"redirect_uri={quote(REDIRECT_URI)}"
-                f"&scope={quote(SCOPE)}"
-                if is_dev
-                else f"{ORIGIN}/client-metadata.json"
-            ),
-            "client_uri": ORIGIN,
-            "redirect_uris": [REDIRECT_URI],
-            "policy_uri": f"{app_url}/policy",
-            "tos_uri": f"{app_url}/tos",
-            "scope": SCOPE,
-            "grant_types": ["authorization_code", "refresh_token"],
-            "response_types": ["code"],
-            "application_type": "web",
-            # "token_endpoint_auth_method": "private_key_jwt",
-            "token_endpoint_auth_method": "none",
-            "dpop_bound_access_tokens": True,
-            "jwks_uri": f"{app_url}/jwks.json",
-            # "token_endpoint_auth_signing_alg": "ES256",  # if auth_method is None
-        }
-
-        return jsonify(config)
-
-    return jsonify(
-        {
-            # simply using the full request URL for the client_id
-            "client_id": client_id,
-            "dpop_bound_access_tokens": True,
-            "application_type": "web",
-            "redirect_uris": [f"{app_url}oauth/callback"],
-            "grant_types": ["authorization_code", "refresh_token"],
-            "response_types": ["code"],
-            "scope": "atproto transition:generic",
-            "token_endpoint_auth_method": "private_key_jwt",
-            "token_endpoint_auth_signing_alg": "ES256",
-            # NOTE: in theory we can return the public key (in JWK format) inline
-            # "jwks": { #    "keys": [CLIENT_PUB_JWK], #},
-            "jwks_uri": f"{app_url}oauth/jwks.json",
-            # the following are optional fields, which might not be displayed by auth server
-            "client_name": "atproto OAuth Flask Backend Demo",
-            "client_uri": app_url,
-        }
-    )
+    # return jsonify(
+    #     {
+    #         # simply using the full request URL for the client_id
+    #         "client_id": client_id,
+    #         "dpop_bound_access_tokens": True,
+    #         "application_type": "web",
+    #         "redirect_uris": [f"{app_url}oauth/callback"],
+    #         "grant_types": ["authorization_code", "refresh_token"],
+    #         "response_types": ["code"],
+    #         "scope": "atproto transition:generic",
+    #         "token_endpoint_auth_method": "private_key_jwt",
+    #         "token_endpoint_auth_signing_alg": "ES256",
+    #         # NOTE: in theory we can return the public key (in JWK format) inline
+    #         # "jwks": { #    "keys": [CLIENT_PUB_JWK], #},
+    #         "jwks_uri": f"{app_url}oauth/jwks.json",
+    #         # the following are optional fields, which might not be displayed by auth server
+    #         "client_name": "atproto OAuth Flask Backend Demo",
+    #         "client_uri": app_url,
+    #     }
+    # )
 
 
 # In this example of a "confidential" OAuth client, we have only a single app key being used. In a production-grade client, it best practice to periodically rotate keys. Including both a "new key" and "old key" at the same time can make this process smoother.
@@ -248,13 +214,21 @@ def oauth_login():
     # Generate DPoP private signing key for this account session. In theory this could be defered until the token request at the end of the athentication flow, but doing it now allows early binding during the PAR request.
     dpop_private_jwk = JsonWebKey.generate_key("EC", "P-256", is_private=True)
 
+    oauth_config = OauthMetadata(app.config.get("ENV", "unknown"))
+    oauth_meta = oauth_config.get_config()
+
     # OAuth scopes requested by this app
-    scope = "atproto transition:generic"
+    # scope = "atproto transition:generic"
+    scope = oauth_meta["scope"]
 
     # Dynamically compute our "client_id" based on the request HTTP Host
     app_url = request.url_root.replace("http://", "https://")
-    redirect_uri = f"{app_url}oauth/callback"
-    client_id = f"{app_url}oauth/client-metadata.json"
+    # redirect_uri = f"{app_url}oauth/callback"
+    # client_id = f"{app_url}oauth/client-metadata.json"
+
+    redirect_uri = oauth_meta["redirect_uris"][0]
+
+    client_id = oauth_meta["client_id"]
 
     # Submit OAuth Pushed Authentication Request (PAR). We could have constructed a more complex authentication request URL below instead, but there are some advantages with PAR, including failing fast, early DPoP binding, and no URL length limitations.
     pkce_verifier, state, dpop_authserver_nonce, resp = send_par_auth_request(

@@ -8,6 +8,7 @@ from authlib.jose import jwt
 from authlib.oauth2.rfc7636 import create_s256_code_challenge
 
 from atproto_security import is_safe_url, hardened_http
+from oauth_metadata import OauthMetadata
 
 
 # Checks an Authorization Server metadata response against atproto OAuth requirements
@@ -196,9 +197,15 @@ def initial_token_request(
     # Re-fetch server metadata
     authserver_meta = fetch_authserver_meta(authserver_url)
 
+    ouath_config = OauthMetadata("development")  # TODO: replace with actual environment
+    oauth_meta = ouath_config.get_config()
+
     # Construct auth token request fields
-    client_id = f"{app_url}oauth/client-metadata.json"
-    redirect_uri = f"{app_url}oauth/callback"
+    # client_id = f"{app_url}oauth/client-metadata.json"
+    # redirect_uri = f"{app_url}oauth/callback"
+
+    client_id = oauth_meta["client_id"]
+    redirect_uri = oauth_meta["redirect_uris"][0]
 
     # Self-signed JWT using the private key declared in client metadata JWKS (confidential client)
     client_assertion = client_assertion_jwt(
