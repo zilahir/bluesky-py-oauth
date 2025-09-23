@@ -4,6 +4,7 @@ import sqlite3
 from datetime import datetime, timezone
 from urllib.parse import urlencode
 from fastapi import FastAPI, Request, Depends, HTTPException, Form, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -29,17 +30,36 @@ from atproto_oauth import (
 )
 from atproto_security import is_safe_url
 from oauth_metadata import OauthMetadata
+from routes import api, auth, me, test
 
 app = FastAPI()
 
+origins = [
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+]
+
 config = Config(".env")
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=config("SECRET_KEY", default="dev-secret-key"),
+    https_only=False,
+    same_site="lax",
+)
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 pwd = pathlib.Path(__file__).parent
 app.mount("/static", StaticFiles(directory=pwd / "static"), name="static")
 
-app.add_middleware(
-    SessionMiddleware, secret_key=config("SECRET_KEY", default="dev-secret-key")
-)
 
 templates = Jinja2Templates(directory="templates")
 
@@ -446,40 +466,40 @@ def bsky_post_submit(
         db.close()
 
 
-@app.exception_handler(HTTPException)
-async def fastapi_http_exception_handler(request: Request, exc: HTTPException):
-    if exc.status_code == 401:
-        return RedirectResponse(url=request.url_for('oauth_login'), status_code=303)
-    else:
-        return templates.TemplateResponse(
-            "error.html",
-            {"request": request, "status_code": exc.status_code, "err": exc},
-            status_code=exc.status_code,
-        )
-
-
-@app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    if exc.status_code == 401:
-        return RedirectResponse(url=request.url_for('oauth_login'), status_code=303)
-    elif exc.status_code == 500:
-        return templates.TemplateResponse(
-            "error.html",
-            {"request": request, "status_code": 500, "err": exc},
-            status_code=500,
-        )
-    elif exc.status_code == 400:
-        return templates.TemplateResponse(
-            "error.html",
-            {"request": request, "status_code": 400, "err": exc},
-            status_code=400,
-        )
-    else:
-        return templates.TemplateResponse(
-            "error.html",
-            {"request": request, "status_code": exc.status_code, "err": exc},
-            status_code=exc.status_code,
-        )
+# @app.exception_handler(HTTPException)
+# async def fastapi_http_exception_handler(request: Request, exc: HTTPException):
+#     if exc.status_code == 401:
+#         return RedirectResponse(url=request.url_for("oauth_login"), status_code=303)
+#     else:
+#         return templates.TemplateResponse(
+#             "error.html",
+#             {"request": request, "status_code": exc.status_code, "err": exc},
+#             status_code=exc.status_code,
+#         )
+#
+#
+# @app.exception_handler(StarletteHTTPException)
+# async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+#     if exc.status_code == 401:
+#         return RedirectResponse(url=request.url_for("oauth_login"), status_code=303)
+#     elif exc.status_code == 500:
+#         return templates.TemplateResponse(
+#             "error.html",
+#             {"request": request, "status_code": 500, "err": exc},
+#             status_code=500,
+#         )
+#     elif exc.status_code == 400:
+#         return templates.TemplateResponse(
+#             "error.html",
+#             {"request": request, "status_code": 400, "err": exc},
+#             status_code=400,
+#         )
+#     else:
+#         return templates.TemplateResponse(
+#             "error.html",
+#             {"request": request, "status_code": exc.status_code, "err": exc},
+#             status_code=exc.status_code,
+#         )
 
 
 @app.exception_handler(RequestValidationError)
@@ -489,3 +509,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         {"request": request, "status_code": 400, "err": exc},
         status_code=400,
     )
+
+
+app.include_router(auth.router)
+app.include_router(test.router)
+app.include_router(me.router)
+app.include_router(api.router)

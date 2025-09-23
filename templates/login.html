@@ -1,4 +1,5 @@
-{% extends 'base.html' %}
+{% extends 'base.jinja' %}
+{% from 'ui/button.jinja' import button %}
 
 {% block content %}
 <article>
@@ -8,7 +9,7 @@
       <br>You can also supply a PDS/entryway URL (eg, <code>https://pds.example.com</code>).</p>
     <fieldset role="group">
       <input name="username" id="username" placeholder="handle.example.com" style="font-family: monospace,monospace;" required>
-      <input type="submit" value="Login">
+      {{ button("Login", type="submit", variant="primary") }}
     </fieldset>
   </form>
 </article>
