@@ -264,11 +264,15 @@ def refresh_token_request(
 ) -> Tuple[dict, str]:
     authserver_url = user["authserver_iss"]
 
+    oauth_config = OauthMetadata("development")  # TODO: replace with actual environment
+    oauth_meta = oauth_config.get_config()
+
     # Re-fetch server metadata
     authserver_meta = fetch_authserver_meta(authserver_url)
 
     # Construct token request fields
-    client_id = f"{app_url}oauth/client-metadata.json"
+    # client_id = f"{app_url}oauth/client-metadata.json"
+    client_id = oauth_meta["client_id"]
 
     # Self-signed JWT using the private key declared in client metadata JWKS (confidential client)
     client_assertion = client_assertion_jwt(
@@ -361,13 +365,14 @@ def pds_authed_req(method: str, url: str, user: dict, db: Any, body=None) -> Any
         )
 
         with hardened_http.get_session() as sess:
-            resp = sess.post(
+            resp = sess.request(
+                method,
                 url,
                 headers={
                     "Authorization": f"DPoP {access_token}",
                     "DPoP": dpop_jwt,
                 },
-                json=body,
+                json=body if method.upper() != "GET" else None,
             )
 
         # If we got a new server-provided DPoP nonce, store it in database and retry.

@@ -1,7 +1,7 @@
-{% extends 'base.html' %}
+{% extends 'base.jinja' %}
 
 {% block content %}
-{% if g.user %}
+{% if user %}
 <p>Not much to see here.</p>
 {% else %}
 <p>Login to get started!</p>

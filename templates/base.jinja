@@ -13,37 +13,28 @@
     <link rel="stylesheet" href="/static/css/tailwind_output.css" />
     <title>atproto OAuth Web Service Example</title>
   </head>
-  <body class="bg-red-500 text-gray-900">
-    <h1 class="text-red-500">lofasz</h1>
+  <body class="">
     <header>
       <hgroup>
         <h1>atproto OAuth Web Service Example</h1>
-        {% if g.user %}
+        {% if user %}
         <p>
-          Hello
-          <span style="font-family: monospace">@{{ g.user['handle'] }}</span>!
+          <span style="font-family: monospace">@{{ user['handle'] }}</span>!
         </p>
         {% endif %}
       </hgroup>
       <nav>
         <ul>
-          {% if g.user %}
+          {% if user %}
           <li><a href="{{ url_for('bsky_post') }}">Create Post</a></li>
           <li><a href="{{ url_for('oauth_refresh') }}">Refresh Token</a></li>
           <li><a href="{{ url_for('oauth_logout') }}">Logout</a> {% else %}</li>
 
+          <li><a href="{{ url_for('bsky_post') }}">Create Post</a></li>
           <li><a href="{{ url_for('oauth_login') }}">Login</a> {% endif %}</li>
-
-          <li><a href="https://github.com/bluesky-social/cookbook">Code</a></li>
         </ul>
       </nav>
     </header>
-    <main>
-      <section class="content">
-        {% for message in get_flashed_messages() %}
-        <article>{{ message }}</article>
-        {% endfor %} {% block content %}{% endblock %}
-      </section>
-    </main>
+    <main>{% block content %} {% endblock %}</main>
   </body>
 </html>

@@ -12,7 +12,7 @@ class OauthMetadata:
         self.APP_URL = "https://app.example.com"
         self.is_dev = env == "development"
         self.ORIGIN = "http://127.0.0.1:5000" if self.is_dev else self.APP_URL
-        self.REDIRECT_URI = abs_path("oauth/callback", self.ORIGIN)
+        self.REDIRECT_URI = abs_path("auth/oauth/callback", self.ORIGIN)
         self.SCOPE = "atproto transition:generic"
 
         self.config = {
