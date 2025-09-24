@@ -108,3 +108,16 @@ class OAuthSession(Base):
     dpop_private_jwk = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    did = Column(String(255), nullable=False, unique=True)
+    handle = Column(String(255), nullable=False)
+    avatar = Column(String(512), nullable=True)
+    display_name = Column(String(255), nullable=True)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)

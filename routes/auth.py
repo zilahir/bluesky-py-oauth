@@ -3,6 +3,8 @@ from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from starlette.config import Config
+from requests import HTTPError, request as req
+
 from starlette.responses import HTMLResponse
 from atproto_identity import (
     is_valid_did,
@@ -21,7 +23,12 @@ from authlib.jose import JsonWebKey
 
 from oauth_metadata import OauthMetadata
 from routes.utils.get_user import get_logged_in_user
-from routes.utils.postgres_connection import get_db, OAuthAuthRequest, OAuthSession
+from routes.utils.postgres_connection import (
+    get_db,
+    OAuthAuthRequest,
+    OAuthSession,
+    User,
+)
 from settings import get_settings
 
 
@@ -244,6 +251,44 @@ def oauth_callback(
         db.add(oauth_session)
     db.commit()
 
+    # Check if user exists in database
+    existing_user = db.query(User).filter(User.did == did).first()
+    if existing_user is None:
+        print("no user yet inserint to the database")
+        req_url = (
+            f"https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor={handle}"
+        )
+        profile_resp = req(
+            "GET",
+            req_url,
+        )
+        if profile_resp.status_code not in [200, 201]:
+            print(f"PDS HTTP Error: {profile_resp.json()}")
+        profile_resp.raise_for_status()
+
+        did = profile_resp.json()["did"]
+
+        account = profile_resp.json()
+
+        user = {
+            "did": did,
+            "handle": account.get("handle", ""),
+            "avatar": account.get("avatar", ""),
+            "display_name": account.get("displayName", ""),
+            "description": account.get("description", ""),
+        }
+
+        # Insert new user into the database
+        new_user = User(
+            did=user["did"],
+            handle=user["handle"],
+            avatar=user["avatar"],
+            display_name=user["display_name"],
+            description=user["description"],
+        )
+        db.add(new_user)
+        db.commit()
+
     # Set a (secure) session cookie in the user's browser, for authentication between the browser and this app
     request.session["user_did"] = did
     # Note that the handle might change over time, and should be re-resolved periodically in a real app
@@ -269,7 +314,7 @@ def oauth_logout(
 ):
     # Delete the session from database
     session_to_delete = (
-        db.query(OAuthSession).filter(OAuthSession.did == user["did"]).first()
+        db.query(OAuthSession).filter(OAuthSession.did == user.did).first()
     )
     if session_to_delete:
         db.delete(session_to_delete)
