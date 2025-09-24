@@ -1,17 +1,53 @@
 from fastapi import APIRouter, Request
 from fastapi import Depends
+from sqlalchemy.orm import Session
+from sqlalchemy.dialects.postgresql import insert
 
 from atproto_oauth import pds_authed_req
 from routes.utils.get_db import get_db
 from routes.utils.get_user import get_logged_in_user
-from requests import request as req
+from requests import HTTPError, request as req
+from routes.utils.postgres_connection import Campaign, get_db as get_pg_db
 
 
 router = APIRouter(prefix="/api", include_in_schema=False)
 
 
-@router.get("/get-bluesky-profile/{handle}")
-def get_bluesky_account(
+@router.post("/new-campaign")
+async def new_campaign(
+    request: Request,
+    user=Depends(get_logged_in_user),
+    db: Session = Depends(get_pg_db),
+):
+    """
+    Create a new campaign.
+    """
+    try:
+        body = await request.json()
+        if not body:
+            # return proper error response if body is empty
+            raise HTTPError("Request body is empty. Please provide the necessary data.")
+
+        followers_to_get = body.get("accountsToFollow", [])
+
+        if not followers_to_get:
+            raise HTTPError("No accounts to follow provided in the request body.")
+
+        insert_campaign = (
+            insert(Campaign)
+            .values(name=body.get("name"), followers_to_get=followers_to_get)
+            .on_conflict_do_nothing()
+        )
+
+        db.execute(insert_campaign)
+        db.commit()
+
+        return {"message": "Campaign created successfully", "data": body}
+    finally:
+        db.close()
+
+
+def get_all_followers_of_account(
     request: Request, handle: str, user=Depends(get_logged_in_user), db=Depends(get_db)
 ):
     try:
@@ -61,6 +97,40 @@ def get_bluesky_account(
             "account": resp.json(),
             "followers": followers,
             "followers_count": len(followers),
+        }
+    finally:
+        db.close()
+
+
+@router.get("/get-bluesky-profile/{handle}")
+def get_bluesky_profile(
+    request: Request, handle: str, user=Depends(get_logged_in_user), db=Depends(get_db)
+):
+    try:
+        body = {}
+        # pds_url = user["pds_url"]
+
+        req_url = (
+            f"https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor={handle}"
+        )
+        # resp = pds_authed_req("GET", req_url, user=user, db=db)
+        profile_resp = req(
+            "GET",
+            req_url,
+        )
+        if profile_resp.status_code not in [200, 201]:
+            print(f"PDS HTTP Error: {profile_resp.json()}")
+        profile_resp.raise_for_status()
+
+        did = profile_resp.json()["did"]
+
+        account = profile_resp.json()
+
+        followers_count = account.get("followersCount", 0)
+
+        return {
+            "account": account,
+            "followers_count": followers_count,
         }
     finally:
         db.close()

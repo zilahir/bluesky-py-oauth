@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     postgres_user: str = "postgres"
     postgres_password: str = "postgres"
     postgres_db: str = "bluesky"
-    db_host: str = "psql"
+    db_host: str = "localhost"
     db_port: int = 5432
     dp_path: str = "demo.sqlite"
 

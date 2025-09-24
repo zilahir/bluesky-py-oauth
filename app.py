@@ -6,9 +6,10 @@ from urllib.parse import urlencode
 from fastapi import FastAPI, Request, Depends, HTTPException, Form, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
-from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.config import Config
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -31,6 +32,8 @@ from atproto_oauth import (
 from atproto_security import is_safe_url
 from oauth_metadata import OauthMetadata
 from routes import api, auth, me, test
+from routes.utils.postgres_connection import get_db
+from settings import get_settings
 
 app = FastAPI()
 
@@ -57,12 +60,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-pwd = pathlib.Path(__file__).parent
-app.mount("/static", StaticFiles(directory=pwd / "static"), name="static")
-
-
-templates = Jinja2Templates(directory="templates")
-
 
 # This is a "confidential" OAuth client, meaning it has access to a persistent secret signing key. parse that key as a global.
 CLIENT_SECRET_JWK = JsonWebKey.import_key(json.loads(config("CLIENT_SECRET_JWK")))
@@ -70,18 +67,6 @@ CLIENT_PUB_JWK = json.loads(CLIENT_SECRET_JWK.as_json(is_private=False))
 
 # Defensively check that the public JWK is really public and didn't somehow end up with secret cryptographic key info
 assert "d" not in CLIENT_PUB_JWK
-
-
-# Helpers for managing database connection.
-# Note that you could use a sqlite ":memory:" database instead. In that case you would want to have a global sqlite connection, instead of re-connecting per connection.
-def get_db():
-    db_path = config("DATABASE_URL", default="demo.sqlite")
-    db = sqlite3.connect(db_path)
-    db.row_factory = sqlite3.Row
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 def query_db(query, args=(), one=False, db=None):
@@ -145,16 +130,33 @@ def get_logged_in_user(request: Request):
 
 
 # Actual web routes start here!
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", response_class=JSONResponse)
 def homepage(request: Request):
-    return templates.TemplateResponse("home.html", {"request": request})
+    return JSONResponse(
+        {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    )
 
 
 @app.get("/health")
-def health_check():
+def health_check(
+    db: Session = Depends(get_db),
+    settings=Depends(get_settings),
+):
+    settings = settings.dict()
+
+    try:
+        db_conn = db.execute(text("SELECT 1")).fetchone()
+        db_ok = db_conn is not None
+    except Exception as e:
+        db_ok = False
+
     return JSONResponse(
         {
             "env": config("ENV", default="unknown"),
+            "settings": settings,
+            "db_ok": db_ok,
         }
     )
 
@@ -200,114 +202,6 @@ def oauth_jwks():
             "keys": [CLIENT_PUB_JWK],
         }
     )
-
-
-# Displays the login form (GET), or starts the OAuth authorization flow (POST).
-@app.get("/oauth/login", response_class=HTMLResponse, name="oauth_login")
-def oauth_login_form(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
-
-
-@app.post("/oauth/login")
-def oauth_login_submit(request: Request, username: str = Form(...)):
-    # Login can start with a handle, DID, or auth server URL. We are calling whatever the user supplied the "username".
-    if is_valid_handle(username) or is_valid_did(username):
-        # If starting with an account identifier, resolve the identity (bi-directionally), fetch the PDS URL, and resolve to the Authorization Server URL
-        login_hint = username
-        did, handle, did_doc = resolve_identity(username)
-        pds_url = pds_endpoint(did_doc)
-        print(f"account PDS: {pds_url}")
-        authserver_url = resolve_pds_authserver(pds_url)
-    elif username.startswith("https://") and is_safe_url(username):
-        # When starting with an auth server, we don't know about the account yet.
-        did, handle, pds_url = None, None, None
-        login_hint = None
-        # Check if this is a Resource Server (PDS) URL; otherwise assume it is authorization server
-        initial_url = username
-        try:
-            authserver_url = resolve_pds_authserver(initial_url)
-        except Exception:
-            authserver_url = initial_url
-    else:
-        request.session["flash_message"] = "Not a valid handle, DID, or auth server URL"
-        return templates.TemplateResponse(
-            "login.html", {"request": request}, status_code=400
-        )
-
-    # Fetch Auth Server metadata. For a self-hosted PDS, this will be the same server (the PDS). For large-scale PDS hosts like Bluesky, this may be a separate "entryway" server filling the Auth Server role.
-    # IMPORTANT: Authorization Server URL is untrusted input, SSRF mitigations are needed
-    print(f"account Authorization Server: {authserver_url}")
-    assert is_safe_url(authserver_url)
-    try:
-        authserver_meta = fetch_authserver_meta(authserver_url)
-    except Exception as err:
-        print(f"failed to fetch auth server metadata: {err}")
-        # raise err
-        request.session["flash_message"] = (
-            "Failed to fetch Auth Server (Entryway) OAuth metadata"
-        )
-        return templates.TemplateResponse(
-            "login.html", {"request": request}, status_code=400
-        )
-
-    # Generate DPoP private signing key for this account session. In theory this could be defered until the token request at the end of the athentication flow, but doing it now allows early binding during the PAR request.
-    dpop_private_jwk = JsonWebKey.generate_key("EC", "P-256", is_private=True)
-
-    oauth_config = OauthMetadata(config("ENV", default="unknown"))
-    oauth_meta = oauth_config.get_config()
-
-    # OAuth scopes requested by this app
-    # scope = "atproto transition:generic"
-    scope = oauth_meta["scope"]
-
-    # Dynamically compute our "client_id" based on the request HTTP Host
-    app_url = str(request.url).replace("http://", "https://").rstrip("/oauth/login")
-    # redirect_uri = f"{app_url}oauth/callback"
-    # client_id = f"{app_url}oauth/client-metadata.json"
-
-    redirect_uri = oauth_meta["redirect_uris"][0]
-
-    client_id = oauth_meta["client_id"]
-
-    # Submit OAuth Pushed Authentication Request (PAR). We could have constructed a more complex authentication request URL below instead, but there are some advantages with PAR, including failing fast, early DPoP binding, and no URL length limitations.
-    pkce_verifier, state, dpop_authserver_nonce, resp = send_par_auth_request(
-        authserver_url,
-        authserver_meta,
-        login_hint,
-        client_id,
-        redirect_uri,
-        scope,
-        CLIENT_SECRET_JWK,
-        dpop_private_jwk,
-    )
-    if resp.status_code == 400:
-        print(f"PAR HTTP 400: {resp.json()}")
-    resp.raise_for_status()
-    # This field is confusingly named: it is basically a token to refering back to the successful PAR request.
-    par_request_uri = resp.json()["request_uri"]
-
-    print(f"saving oauth_auth_request to DB  state={state}")
-    query_db(
-        "INSERT INTO oauth_auth_request (state, authserver_iss, did, handle, pds_url, pkce_verifier, scope, dpop_authserver_nonce, dpop_private_jwk) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?);",
-        [
-            state,
-            authserver_meta["issuer"],
-            did,  # might be None
-            handle,  # might be None
-            pds_url,  # might be None
-            pkce_verifier,
-            scope,
-            dpop_authserver_nonce,
-            dpop_private_jwk.as_json(is_private=True),
-        ],
-    )
-
-    # Forward the user to the Authorization Server to complete the browser auth flow.
-    # IMPORTANT: Authorization endpoint URL is untrusted input, security mitigations are needed before redirecting user
-    auth_url = authserver_meta["authorization_endpoint"]
-    assert is_safe_url(auth_url)
-    qparam = urlencode({"client_id": client_id, "request_uri": par_request_uri})
-    return RedirectResponse(url=f"{auth_url}?{qparam}", status_code=303)
 
 
 # Endpoint for receiving "callback" responses from the Authorization Server, to complete the auth flow.
@@ -418,97 +312,6 @@ def oauth_logout(request: Request, user=Depends(get_logged_in_user)):
     query_db("DELETE FROM oauth_session WHERE did = ?;", [user["did"]])
     request.session.clear()
     return RedirectResponse(url="/")
-
-
-# Example form endpoint demonstrating making an authenticated request to the logged-in user's PDS to create a repository record.
-@app.get("/bsky/post", response_class=HTMLResponse, name="bsky_post")
-def bsky_post_form(request: Request, user=Depends(get_logged_in_user)):
-    return templates.TemplateResponse(
-        "bsky_post.html",
-        {
-            "request": request,
-            "user": user,
-        },
-    )
-
-
-@app.post("/bsky/post")
-def bsky_post_submit(
-    request: Request, post_text: str = Form(...), user=Depends(get_logged_in_user)
-):
-    pds_url = user["pds_url"]
-    req_url = f"{pds_url}/xrpc/com.atproto.repo.createRecord"
-
-    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    body = {
-        "repo": user["did"],
-        "collection": "app.bsky.feed.post",
-        "record": {
-            "$type": "app.bsky.feed.post",
-            "text": post_text,
-            "createdAt": now,
-        },
-    }
-
-    # We need to get a database connection for pds_authed_req
-    db_path = config("DATABASE_URL", default="demo.sqlite")
-    db = sqlite3.connect(db_path)
-    db.row_factory = sqlite3.Row
-    try:
-        resp = pds_authed_req("POST", req_url, body=body, user=user, db=db)
-        if resp.status_code not in [200, 201]:
-            print(f"PDS HTTP Error: {resp.json()}")
-        resp.raise_for_status()
-
-        request.session["flash_message"] = "Post record created in PDS!"
-        return templates.TemplateResponse("bsky_post.html", {"request": request})
-    finally:
-        db.close()
-
-
-# @app.exception_handler(HTTPException)
-# async def fastapi_http_exception_handler(request: Request, exc: HTTPException):
-#     if exc.status_code == 401:
-#         return RedirectResponse(url=request.url_for("oauth_login"), status_code=303)
-#     else:
-#         return templates.TemplateResponse(
-#             "error.html",
-#             {"request": request, "status_code": exc.status_code, "err": exc},
-#             status_code=exc.status_code,
-#         )
-#
-#
-# @app.exception_handler(StarletteHTTPException)
-# async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-#     if exc.status_code == 401:
-#         return RedirectResponse(url=request.url_for("oauth_login"), status_code=303)
-#     elif exc.status_code == 500:
-#         return templates.TemplateResponse(
-#             "error.html",
-#             {"request": request, "status_code": 500, "err": exc},
-#             status_code=500,
-#         )
-#     elif exc.status_code == 400:
-#         return templates.TemplateResponse(
-#             "error.html",
-#             {"request": request, "status_code": 400, "err": exc},
-#             status_code=400,
-#         )
-#     else:
-#         return templates.TemplateResponse(
-#             "error.html",
-#             {"request": request, "status_code": exc.status_code, "err": exc},
-#             status_code=exc.status_code,
-#         )
-
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    return templates.TemplateResponse(
-        "error.html",
-        {"request": request, "status_code": 400, "err": exc},
-        status_code=400,
-    )
 
 
 app.include_router(auth.router)
