@@ -1,7 +1,7 @@
 from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import JSONResponse, RedirectResponse
-import sqlite3
+from sqlalchemy.orm import Session
 from starlette.config import Config
 from starlette.responses import HTMLResponse
 from atproto_identity import (
@@ -21,29 +21,8 @@ from authlib.jose import JsonWebKey
 
 from oauth_metadata import OauthMetadata
 from routes.utils.get_user import get_logged_in_user
+from routes.utils.postgres_connection import get_db, OAuthAuthRequest, OAuthSession
 from settings import get_settings
-
-
-def query_db(query, args=(), one=False, db=None):
-    if db is None:
-        db_path = get_settings().dp_path
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        should_close = True
-    else:
-        conn = db
-        should_close = False
-
-    try:
-        cur = conn.cursor()
-        cur.execute(query, args)
-        rv = cur.fetchall()
-        conn.commit()
-        cur.close()
-        return (rv[0] if rv else None) if one else rv
-    finally:
-        if should_close:
-            conn.close()
 
 
 router = APIRouter(prefix="/auth", include_in_schema=False)
@@ -54,6 +33,7 @@ def oauth_login_submit(
     request: Request,
     username: str = Form(...),
     settings=Depends(get_settings),
+    db: Session = Depends(get_db),
 ):
     # Login can start with a handle, DID, or auth server URL. We are calling whatever the user supplied the "username".
     if is_valid_handle(username) or is_valid_did(username):
@@ -139,20 +119,19 @@ def oauth_login_submit(
     par_request_uri = resp.json()["request_uri"]
 
     print(f"saving oauth_auth_request to DB  state={state}")
-    query_db(
-        "INSERT INTO oauth_auth_request (state, authserver_iss, did, handle, pds_url, pkce_verifier, scope, dpop_authserver_nonce, dpop_private_jwk) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?);",
-        [
-            state,
-            authserver_meta["issuer"],
-            did,  # might be None
-            handle,  # might be None
-            pds_url,  # might be None
-            pkce_verifier,
-            scope,
-            dpop_authserver_nonce,
-            dpop_private_jwk.as_json(is_private=True),
-        ],
+    auth_request = OAuthAuthRequest(
+        state=state,
+        authserver_iss=authserver_meta["issuer"],
+        did=did,  # might be None
+        handle=handle,  # might be None
+        pds_url=pds_url,  # might be None
+        pkce_verifier=pkce_verifier,
+        scope=scope,
+        dpop_authserver_nonce=dpop_authserver_nonce,
+        dpop_private_jwk=dpop_private_jwk.as_json(is_private=True),
     )
+    db.add(auth_request)
+    db.commit()
 
     # Forward the user to the Authorization Server to complete the browser auth flow.
     # IMPORTANT: Authorization endpoint URL is untrusted input, security mitigations are needed before redirecting user
@@ -165,46 +144,63 @@ def oauth_login_submit(
 
 @router.get("/oauth/callback")
 def oauth_callback(
-    request: Request, state: str, iss: str, code: str, settings=Depends(get_settings)
+    request: Request,
+    state: str,
+    iss: str,
+    code: str,
+    settings=Depends(get_settings),
+    db: Session = Depends(get_db),
 ):
     authserver_iss = iss
     authorization_code = code
 
     # Lookup auth request by the "state" token (which we randomly generated earlier)
-    row = query_db(
-        "SELECT * FROM oauth_auth_request WHERE state = ?;",
-        [state],
-        one=True,
+    auth_request = (
+        db.query(OAuthAuthRequest).filter(OAuthAuthRequest.state == state).first()
     )
-    if row is None:
+    if auth_request is None:
         return JSONResponse(
             {"error": "Invalid state parameter. Please try again."},
             status_code=400,
         )
 
     # Delete row to prevent response replay
-    query_db("DELETE FROM oauth_auth_request WHERE state = ?;", [state])
+    db.delete(auth_request)
+    db.commit()
 
     # Verify query param "iss" against earlier oauth request "iss"
-    assert row["authserver_iss"] == authserver_iss
+    if str(auth_request.authserver_iss) != authserver_iss:
+        raise ValueError("Authorization server issuer mismatch")
     # This is redundant with the above SQL query, but also double-checking that the "state" param matches the original request
-    assert row["state"] == state
+    if str(auth_request.state) != state:
+        raise ValueError("State parameter mismatch")
 
     # Complete the auth flow by requesting auth tokens from the authorization server.
     app_url = (
         str(request.url).replace("http://", "https://").split("/oauth/callback")[0]
     )
+    # Convert SQLAlchemy model to dictionary for initial_token_request function
+    auth_request_dict = {
+        "authserver_iss": auth_request.authserver_iss,
+        "pkce_verifier": auth_request.pkce_verifier,
+        "dpop_private_jwk": auth_request.dpop_private_jwk,
+        "dpop_authserver_nonce": auth_request.dpop_authserver_nonce,
+    }
     tokens, dpop_authserver_nonce = initial_token_request(
-        row,
+        auth_request_dict,
         authorization_code,
         app_url,
         settings.client_secret_jwk_obj,
     )
 
     # Now we verify the account authentication against the original request
-    if row["did"]:
+    if auth_request.did:
         # If we started with an account identifier, this is simple
-        did, handle, pds_url = row["did"], row["handle"], row["pds_url"]
+        did, handle, pds_url = (
+            auth_request.did,
+            auth_request.handle,
+            auth_request.pds_url,
+        )
         assert tokens["sub"] == did
     else:
         # If we started with an auth server URL, now we need to resolve the identity
@@ -218,23 +214,35 @@ def oauth_callback(
         assert authserver_url == authserver_iss
 
     # Verify that returned scope matches request (waiting for PDS update)
-    assert row["scope"] == tokens["scope"]
+    assert auth_request.scope == tokens["scope"]
 
     # Save session (including auth tokens) in database
     print(f"saving oauth_session to DB  {did}")
-    query_db(
-        "INSERT OR REPLACE INTO oauth_session (did, handle, pds_url, authserver_iss, access_token, refresh_token, dpop_authserver_nonce, dpop_private_jwk) VALUES(?, ?, ?, ?, ?, ?, ?, ?);",
-        [
-            did,
-            handle,
-            pds_url,
-            authserver_iss,
-            tokens["access_token"],
-            tokens["refresh_token"],
-            dpop_authserver_nonce,
-            row["dpop_private_jwk"],
-        ],
-    )
+    # Check if session already exists
+    existing_session = db.query(OAuthSession).filter(OAuthSession.did == did).first()
+    if existing_session:
+        # Update existing session
+        existing_session.handle = handle
+        existing_session.pds_url = pds_url
+        existing_session.authserver_iss = authserver_iss
+        existing_session.access_token = tokens["access_token"]
+        existing_session.refresh_token = tokens["refresh_token"]
+        existing_session.dpop_authserver_nonce = dpop_authserver_nonce
+        existing_session.dpop_private_jwk = auth_request.dpop_private_jwk
+    else:
+        # Create new session
+        oauth_session = OAuthSession(
+            did=did,
+            handle=handle,
+            pds_url=pds_url,
+            authserver_iss=authserver_iss,
+            access_token=tokens["access_token"],
+            refresh_token=tokens["refresh_token"],
+            dpop_authserver_nonce=dpop_authserver_nonce,
+            dpop_private_jwk=auth_request.dpop_private_jwk,
+        )
+        db.add(oauth_session)
+    db.commit()
 
     # Set a (secure) session cookie in the user's browser, for authentication between the browser and this app
     request.session["user_did"] = did
@@ -256,8 +264,16 @@ def oauth_callback(
 
 
 @router.get("/oauth/logout")
-def oauth_logout(request: Request, user=Depends(get_logged_in_user)):
-    query_db("DELETE FROM oauth_session WHERE did = ?;", [user["did"]])
+def oauth_logout(
+    request: Request, user=Depends(get_logged_in_user), db: Session = Depends(get_db)
+):
+    # Delete the session from database
+    session_to_delete = (
+        db.query(OAuthSession).filter(OAuthSession.did == user["did"]).first()
+    )
+    if session_to_delete:
+        db.delete(session_to_delete)
+        db.commit()
     request.session.clear()
     return JSONResponse(
         {"message": "LOGOUT_SUCCESS"},

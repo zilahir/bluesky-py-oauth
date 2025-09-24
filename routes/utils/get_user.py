@@ -1,31 +1,8 @@
-import sqlite3
 from fastapi.exceptions import HTTPException
 from fastapi.requests import Request
+from sqlalchemy.orm import Session
 
-from settings import get_settings
-
-
-def query_db(query, args=(), one=False, db=None):
-    settings = get_settings()
-    if db is None:
-        db_path = settings.dp_path
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        should_close = True
-    else:
-        conn = db
-        should_close = False
-
-    try:
-        cur = conn.cursor()
-        cur.execute(query, args)
-        rv = cur.fetchall()
-        conn.commit()
-        cur.close()
-        return (rv[0] if rv else None) if one else rv
-    finally:
-        if should_close:
-            conn.close()
+from routes.utils.postgres_connection import get_db, OAuthSession
 
 
 def get_current_user(request: Request):
@@ -36,9 +13,12 @@ def get_current_user(request: Request):
     if user_did is None:
         return None
     else:
-        return query_db(
-            "SELECT * FROM oauth_session WHERE did = ?", (user_did,), one=True
-        )
+        db = next(get_db())
+        try:
+            oauth_session = db.query(OAuthSession).filter(OAuthSession.did == user_did).first()
+            return oauth_session
+        finally:
+            db.close()
 
 
 def get_logged_in_user(request: Request):
