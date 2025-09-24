@@ -2,7 +2,7 @@ from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy.schema import Column
+from sqlalchemy.schema import Column, ForeignKey
 from sqlalchemy.sql import text
 from sqlalchemy.types import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -125,3 +125,15 @@ class User(Base):
     description = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class FollowersToGet(Base):
+    __tablename__ = "followers_to_get"
+
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(Integer, ForeignKey('campaigns.id', ondelete='CASCADE'), nullable=False, index=True)
+    account_handle = Column(String(255), nullable=False, index=True)
+    me_following = Column(Boolean, nullable=False, default=False)
+    is_following_me = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
