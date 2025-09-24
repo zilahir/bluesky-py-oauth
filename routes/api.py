@@ -7,7 +7,7 @@ from atproto_oauth import pds_authed_req
 from routes.utils.get_db import get_db
 from routes.utils.get_user import get_logged_in_user
 from requests import HTTPError, request as req
-from routes.utils.postgres_connection import Campaign, get_db as get_pg_db
+from routes.utils.postgres_connection import Campaign, FollowersToGet, get_db as get_pg_db
 from queue_config import get_queue
 from tasks import process_campaign_task
 
@@ -40,8 +40,37 @@ async def get_campaign(
         if not campaign:
             raise HTTPError("Campaign not found")
 
+        # Get all followers for this campaign
+        followers = (
+            db.query(FollowersToGet)
+            .filter(FollowersToGet.campaign_id == campaign_id)
+            .all()
+        )
+
+        # Convert campaign to dict and add followers
+        campaign_data = campaign.__dict__.copy()
+
+        # Remove SQLAlchemy internal state
+        campaign_data.pop('_sa_instance_state', None)
+
+        # Add followers data
+        campaign_data['followers'] = [
+            {
+                'id': follower.id,
+                'account_handle': follower.account_handle,
+                'me_following': follower.me_following,
+                'is_following_me': follower.is_following_me,
+                'created_at': follower.created_at.isoformat() if follower.created_at else None,
+                'updated_at': follower.updated_at.isoformat() if follower.updated_at else None
+            }
+            for follower in followers
+        ]
+
+        # Add followers count
+        campaign_data['followers_count'] = len(followers)
+
         return {
-            "data": campaign.__dict__,
+            "data": campaign_data,
         }
     finally:
         db.close()
