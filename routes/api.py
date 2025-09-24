@@ -15,6 +15,38 @@ from tasks import process_campaign_task
 router = APIRouter(prefix="/api", include_in_schema=False)
 
 
+@router.get("/campaign/{campaign_id}")
+async def get_campaign(
+    campaign_id: int,
+    user=Depends(get_logged_in_user),
+    db: Session = Depends(get_pg_db),
+):
+    """
+    Get a specific campaign by ID for the logged-in user.
+    """
+    try:
+        if not user:
+            raise HTTPError("Authentication required")
+
+        if not campaign_id:
+            raise HTTPError("Campaign ID is required")
+
+        campaign = (
+            db.query(Campaign)
+            .filter(Campaign.id == campaign_id, Campaign.user_did == user.did)
+            .first()
+        )
+
+        if not campaign:
+            raise HTTPError("Campaign not found")
+
+        return {
+            "data": campaign.__dict__,
+        }
+    finally:
+        db.close()
+
+
 @router.get("/campaigns")
 async def get_campaigns(
     user=Depends(get_logged_in_user),
@@ -62,6 +94,8 @@ async def new_campaign(
                 name=body.get("name"),
                 followers_to_get=followers_to_get,
                 user_did=user.did,
+                is_setup_job_running=True,
+                total_followers_to_get=len(followers_to_get),
             )
             .on_conflict_do_nothing()
         )

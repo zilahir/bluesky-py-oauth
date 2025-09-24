@@ -4,7 +4,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.schema import Column
 from sqlalchemy.sql import text
-from sqlalchemy.types import DateTime, Integer, String, Text
+from sqlalchemy.types import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from settings import get_settings
@@ -73,6 +73,9 @@ class Campaign(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True)
     user_did = Column(String(255), nullable=True, index=True)
+    total_followers_to_get = Column(Integer, nullable=True, default=0)
+    is_campaign_running = Column(Boolean, nullable=False, default=False)
+    is_setup_job_running = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     deleted_at = Column(DateTime, nullable=True)
     followers_to_get = Column(JSONB, nullable=True)
