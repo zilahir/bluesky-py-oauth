@@ -249,6 +249,22 @@ def process_campaign_task(campaign_data: Dict[str, Any]) -> str:
                 continue  # Continue with next account
 
         print(f"\nCompleted processing all accounts for campaign: {campaign_name}")
+
+        # set the is_setup_job_running to False on the campaign
+        db = next(get_db())
+        try:
+            campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+            if campaign:
+                campaign.is_setup_job_running = False
+                db.commit()
+                print(f"Campaign '{campaign_name}' setup job marked as complete")
+            else:
+                print(f"Campaign with ID {campaign_id} not found for update")
+        except Exception as e:
+            print(f"Error updating campaign status: {e}")
+            db.rollback()
+        finally:
+            db.close()
     else:
         print("No accounts to process in followers_to_get")
 
