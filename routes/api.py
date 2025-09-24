@@ -8,6 +8,8 @@ from routes.utils.get_db import get_db
 from routes.utils.get_user import get_logged_in_user
 from requests import HTTPError, request as req
 from routes.utils.postgres_connection import Campaign, get_db as get_pg_db
+from queue_config import get_queue
+from tasks import process_campaign_task
 
 
 router = APIRouter(prefix="/api", include_in_schema=False)
@@ -42,7 +44,15 @@ async def new_campaign(
         db.execute(insert_campaign)
         db.commit()
 
-        return {"message": "Campaign created successfully", "data": body}
+        # Enqueue the campaign processing task
+        queue = get_queue('campaign_processing')
+        job = queue.enqueue(process_campaign_task, body)
+
+        return {
+            "message": "Campaign created successfully",
+            "data": body,
+            "job_id": job.id
+        }
     finally:
         db.close()
 
