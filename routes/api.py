@@ -98,13 +98,19 @@ async def new_campaign(
                 total_followers_to_get=len(followers_to_get),
             )
             .on_conflict_do_nothing()
+            .returning(Campaign.id)
         )
 
-        db.execute(insert_campaign)
+        result = db.execute(insert_campaign)
+
+        new_id = result.scalar_one()
         db.commit()
 
+        ## add the new campaiign id to the body
+        body["campaign_id"] = new_id
+
         # Enqueue the campaign processing task
-        queue = get_queue("campaign_processing")
+        queue = get_queue("campaign_get_all_followers")
         job = queue.enqueue(process_campaign_task, body)
 
         return {

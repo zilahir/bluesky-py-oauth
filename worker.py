@@ -5,15 +5,20 @@ RQ Worker for processing background tasks
 Usage:
     python worker.py
 
-This will start a worker that listens for tasks in the 'campaign_processing' queue.
+This will start a worker that listens for tasks in the 'campaign_get_all_followers' queue.
 """
 
 from rq import Worker
 from queue_config import get_redis_connection
+from routes.utils.postgres_connection import get_db
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     redis_conn = get_redis_connection()
-    worker = Worker(['campaign_processing'], connection=redis_conn)
-    print("Worker started. Listening for tasks on 'campaign_processing' queue...")
+
+    worker = Worker(["campaign_get_all_followers"], connection=redis_conn)
+    print(
+        "Worker started. Listening for tasks on 'campaign_get_all_followers' queue..."
+    )
     print("Press Ctrl+C to exit")
     worker.work()
+
