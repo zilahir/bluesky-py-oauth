@@ -4,7 +4,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.schema import Column
 from sqlalchemy.sql import text
-from sqlalchemy.types import DateTime, Integer, String
+from sqlalchemy.types import DateTime, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from settings import get_settings
@@ -75,3 +75,36 @@ class Campaign(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     deleted_at = Column(DateTime, nullable=True)
     followers_to_get = Column(JSONB, nullable=True)
+
+
+class OAuthAuthRequest(Base):
+    __tablename__ = "oauth_auth_request"
+
+    id = Column(Integer, primary_key=True)
+    state = Column(String(255), nullable=False, unique=True)
+    authserver_iss = Column(String(255), nullable=False)
+    did = Column(String(255), nullable=True)
+    handle = Column(String(255), nullable=True)
+    pds_url = Column(String(255), nullable=True)
+    pkce_verifier = Column(String(255), nullable=False)
+    scope = Column(String(255), nullable=True)
+    dpop_authserver_nonce = Column(String(255), nullable=True)
+    dpop_private_jwk = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class OAuthSession(Base):
+    __tablename__ = "oauth_session"
+
+    id = Column(Integer, primary_key=True)
+    did = Column(String(255), nullable=False)
+    handle = Column(String(255), nullable=False)
+    pds_url = Column(String(512), nullable=False)
+    authserver_iss = Column(String(512), nullable=False)
+    access_token = Column(Text, nullable=False)
+    refresh_token = Column(Text, nullable=False)
+    dpop_authserver_nonce = Column(String(512), nullable=True)
+    dpop_private_jwk = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
