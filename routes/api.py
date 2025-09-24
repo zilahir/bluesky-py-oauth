@@ -15,6 +15,27 @@ from tasks import process_campaign_task
 router = APIRouter(prefix="/api", include_in_schema=False)
 
 
+@router.get("/campaigns")
+async def get_campaigns(
+    user=Depends(get_logged_in_user),
+    db: Session = Depends(get_pg_db),
+):
+    """
+    Get all campaigns for the logged-in user.
+    """
+    try:
+        if not user:
+            raise HTTPError("Authentication required")
+
+        campaigns = db.query(Campaign).filter(Campaign.user_did == user.did).all()
+
+        return {
+            "data": [campaign.__dict__ for campaign in campaigns],
+        }
+    finally:
+        db.close()
+
+
 @router.post("/new-campaign")
 async def new_campaign(
     request: Request,
