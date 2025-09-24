@@ -37,7 +37,11 @@ async def new_campaign(
 
         insert_campaign = (
             insert(Campaign)
-            .values(name=body.get("name"), followers_to_get=followers_to_get)
+            .values(
+                name=body.get("name"),
+                followers_to_get=followers_to_get,
+                user_did=user.did,
+            )
             .on_conflict_do_nothing()
         )
 
@@ -45,13 +49,13 @@ async def new_campaign(
         db.commit()
 
         # Enqueue the campaign processing task
-        queue = get_queue('campaign_processing')
+        queue = get_queue("campaign_processing")
         job = queue.enqueue(process_campaign_task, body)
 
         return {
             "message": "Campaign created successfully",
             "data": body,
-            "job_id": job.id
+            "job_id": job.id,
         }
     finally:
         db.close()
@@ -117,13 +121,9 @@ def get_bluesky_profile(
     request: Request, handle: str, user=Depends(get_logged_in_user), db=Depends(get_db)
 ):
     try:
-        body = {}
-        # pds_url = user["pds_url"]
-
         req_url = (
             f"https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor={handle}"
         )
-        # resp = pds_authed_req("GET", req_url, user=user, db=db)
         profile_resp = req(
             "GET",
             req_url,
