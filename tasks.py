@@ -7,8 +7,15 @@ import os
 
 os.environ["no_proxy"] = "*"
 
-from routes.utils.postgres_connection import get_db, Campaign, FollowersToGet
+from routes.utils.postgres_connection import (
+    get_db,
+    Campaign,
+    FollowersToGet,
+    OAuthSession,
+)
 from queue_config import get_queue
+from atproto_oauth import pds_authed_req
+from datetime import datetime
 
 ACCOUNTS_TO_FOLLOW_PER_DAY = 10
 
@@ -142,36 +149,53 @@ def save_followers_to_db(
     """
     print(f"Saving {len(followers)} followers for {account_handle} to database")
 
-    db = next(get_db())
+    # Create a fresh database session for this operation
+    from routes.utils.postgres_connection import SessionLocal
+
+    db = SessionLocal()
+
     try:
+        # Get existing followers for this campaign to avoid duplicates
+        existing_handles = set()
+        existing_followers = (
+            db.query(FollowersToGet.account_handle)
+            .filter(FollowersToGet.campaign_id == campaign_id)
+            .all()
+        )
+        for row in existing_followers:
+            existing_handles.add(row[0])
+
+        # Prepare new followers data, filtering out existing ones
+        new_followers = []
         for follower in followers:
             follower_handle = follower.get("handle", "")
-
-            # Check if this follower already exists for this campaign
-            existing = (
-                db.query(FollowersToGet)
-                .filter(
-                    FollowersToGet.campaign_id == campaign_id,
-                    FollowersToGet.account_handle == follower_handle,
-                )
-                .first()
-            )
-
-            if not existing:
+            if follower_handle and follower_handle not in existing_handles:
                 new_follower = FollowersToGet(
                     campaign_id=campaign_id,
                     account_handle=follower_handle,
                     me_following=None,  # Will be set to timestamp when followed
                     is_following_me=None,  # Will be set to timestamp when they follow back
                 )
-                db.add(new_follower)
+                new_followers.append(new_follower)
 
-        db.commit()
-        print(f"Successfully saved followers for {account_handle}")
+        if new_followers:
+            # Bulk insert new followers
+            db.add_all(new_followers)
+            db.commit()
+
+            print(
+                f"Successfully added {len(new_followers)} new followers for {account_handle}"
+            )
+            print(f"Skipped {len(followers) - len(new_followers)} existing followers")
+        else:
+            print(
+                f"All {len(followers)} followers for {account_handle} already exist in database"
+            )
 
     except Exception as e:
         print(f"Error saving followers for {account_handle}: {e}")
         db.rollback()
+        raise e
     finally:
         db.close()
 
@@ -343,6 +367,7 @@ def execute_campaign_task(campaign_id: int) -> str:
             followers = (
                 db.query(FollowersToGet)
                 .filter(FollowersToGet.campaign_id == campaign_id)
+                .limit(10)
                 .all()
             )
 
@@ -355,24 +380,140 @@ def execute_campaign_task(campaign_id: int) -> str:
                 print("No followers found to process")
                 return f"No followers found for campaign '{campaign_name}'"
 
+            # Get user's OAuth session for API authentication
+            oauth_session = (
+                db.query(OAuthSession)
+                .filter(OAuthSession.did == campaign_user_did)
+                .first()
+            )
+            if not oauth_session:
+                print(
+                    f"Error: No OAuth session found for user DID: {campaign_user_did}"
+                )
+                return f"Error: No OAuth session found for user"
+
+            # Extract OAuth data for API calls
+            access_token = oauth_session.access_token
+            dpop_private_jwk_json = oauth_session.dpop_private_jwk
+            dpop_pds_nonce = oauth_session.dpop_pds_nonce or ""
+
             # Process each follower
             processed_count = 0
             for follower in followers:
                 try:
                     print(f"Processing follower: {follower.account_handle}")
 
-                    # Here you would implement the actual campaign logic
-                    # For example: follow the user, send a message, etc.
-                    # This is where you'd integrate with Bluesky API for actions
+                    # Skip if we already have a follow timestamp (already following)
+                    if follower.me_following:
+                        print(
+                            f"Already following {follower.account_handle} since {follower.me_following}"
+                        )
+                        processed_count += 1
+                        continue
 
-                    # For now, just simulate processing
-                    time.sleep(0.1)  # Small delay to simulate work
+                    # Check if we're already following this user via Bluesky API
+                    try:
+                        # Get the user's profile to get their DID
+                        profile_url = f"https://bsky.social/xrpc/app.bsky.actor.getProfile?actor={follower.account_handle}"
+                        profile_resp = pds_authed_req(
+                            "GET",
+                            profile_url,
+                            access_token=access_token,
+                            dpop_private_jwk_json=dpop_private_jwk_json,
+                            user_did=campaign_user_did,
+                            db=db,
+                            dpop_pds_nonce=dpop_pds_nonce
+                        )
 
-                    # Update follower status if needed
-                    # follower.me_following = True  # Example update
-                    # db.commit()
+                        if profile_resp.status_code not in [200, 201]:
+                            print(
+                                f"Failed to get profile for {follower.account_handle}: {profile_resp.status_code}"
+                            )
+                            continue
+
+                        target_did = profile_resp.json().get("did")
+                        if not target_did:
+                            print(f"No DID found for {follower.account_handle}")
+                            continue
+
+                        # Check if we're already following them
+                        following_url = f"https://bsky.social/xrpc/app.bsky.graph.getFollows?actor={campaign_user_did}&limit=100"
+                        follows_resp = pds_authed_req(
+                            "GET",
+                            following_url,
+                            access_token=access_token,
+                            dpop_private_jwk_json=dpop_private_jwk_json,
+                            user_did=campaign_user_did,
+                            db=db,
+                            dpop_pds_nonce=dpop_pds_nonce
+                        )
+
+                        already_following = False
+                        if follows_resp.status_code in [200, 201]:
+                            follows_data = follows_resp.json()
+                            for follow in follows_data.get("follows", []):
+                                if follow.get("did") == target_did:
+                                    already_following = True
+                                    # Update database with current timestamp since we're already following
+                                    follower.me_following = datetime.utcnow()
+                                    db.commit()
+                                    print(
+                                        f"Already following {follower.account_handle} - updated database"
+                                    )
+                                    break
+
+                        if not already_following:
+                            # Follow the user
+                            follow_payload = {
+                                "$type": "app.bsky.graph.follow",
+                                "subject": target_did,
+                                "createdAt": datetime.utcnow().isoformat() + "Z",
+                            }
+
+                            create_record_url = (
+                                "https://bsky.social/xrpc/com.atproto.repo.createRecord"
+                            )
+                            create_record_payload = {
+                                "repo": campaign_user_did,
+                                "collection": "app.bsky.graph.follow",
+                                "record": follow_payload,
+                            }
+
+                            follow_resp = pds_authed_req(
+                                "POST",
+                                create_record_url,
+                                access_token=access_token,
+                                dpop_private_jwk_json=dpop_private_jwk_json,
+                                user_did=campaign_user_did,
+                                db=db,
+                                dpop_pds_nonce=dpop_pds_nonce,
+                                body=create_record_payload,
+                            )
+
+                            if follow_resp.status_code in [200, 201]:
+                                # Successfully followed, update database with timestamp
+                                follower.me_following = datetime.utcnow()
+                                db.commit()
+                                print(
+                                    f"Successfully followed {follower.account_handle}"
+                                )
+                            else:
+                                print(
+                                    f"Failed to follow {follower.account_handle}: {follow_resp.status_code}"
+                                )
+                                if follow_resp.status_code == 429:
+                                    print("Rate limited - waiting before continuing...")
+                                    time.sleep(5)  # Wait 5 seconds for rate limiting
+
+                    except Exception as e:
+                        print(
+                            f"Error processing follow for {follower.account_handle}: {e}"
+                        )
 
                     processed_count += 1
+
+                    # Rate limiting - small delay between requests
+                    time.sleep(1)
 
                     if processed_count % 100 == 0:
                         print(f"Processed {processed_count}/{follower_count} followers")

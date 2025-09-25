@@ -237,6 +237,7 @@ def oauth_callback(
         existing_session.access_token = tokens["access_token"]
         existing_session.refresh_token = tokens["refresh_token"]
         existing_session.dpop_authserver_nonce = dpop_authserver_nonce
+        existing_session.dpop_pds_nonce = None  # Will be set when making PDS requests
         existing_session.dpop_private_jwk = auth_request.dpop_private_jwk
     else:
         # Create new session
@@ -248,6 +249,7 @@ def oauth_callback(
             access_token=tokens["access_token"],
             refresh_token=tokens["refresh_token"],
             dpop_authserver_nonce=dpop_authserver_nonce,
+            dpop_pds_nonce=None,  # Will be set when making PDS requests
             dpop_private_jwk=auth_request.dpop_private_jwk,
         )
         db.add(oauth_session)

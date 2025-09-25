@@ -109,6 +109,7 @@ class OAuthSession(Base):
     access_token = Column(Text, nullable=False)
     refresh_token = Column(Text, nullable=False)
     dpop_authserver_nonce = Column(String(512), nullable=True)
+    dpop_pds_nonce = Column(String(512), nullable=True)
     dpop_private_jwk = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
