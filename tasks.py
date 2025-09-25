@@ -367,7 +367,7 @@ def execute_campaign_task(campaign_id: int) -> str:
             followers = (
                 db.query(FollowersToGet)
                 .filter(FollowersToGet.campaign_id == campaign_id)
-                .limit(10)
+                .limit(2)
                 .all()
             )
 
@@ -395,7 +395,8 @@ def execute_campaign_task(campaign_id: int) -> str:
             # Extract OAuth data for API calls
             access_token = oauth_session.access_token
             dpop_private_jwk_json = oauth_session.dpop_private_jwk
-            dpop_pds_nonce = oauth_session.dpop_pds_nonce or ""
+            dpop_pds_nonce = getattr(oauth_session, "dpop_pds_nonce", None) or ""
+            pds_url = oauth_session.pds_url
 
             # Process each follower
             processed_count = 0
@@ -414,21 +415,19 @@ def execute_campaign_task(campaign_id: int) -> str:
                     # Check if we're already following this user via Bluesky API
                     try:
                         # Get the user's profile to get their DID
-                        profile_url = f"https://bsky.social/xrpc/app.bsky.actor.getProfile?actor={follower.account_handle}"
-                        profile_resp = pds_authed_req(
-                            "GET",
-                            profile_url,
-                            access_token=access_token,
-                            dpop_private_jwk_json=dpop_private_jwk_json,
-                            user_did=campaign_user_did,
-                            db=db,
-                            dpop_pds_nonce=dpop_pds_nonce
-                        )
+                        # First try the public API endpoint (no authentication needed for basic profile info)
+                        profile_url = f"https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor={follower.account_handle}"
+                        profile_resp = req("GET", profile_url, timeout=30)
 
                         if profile_resp.status_code not in [200, 201]:
                             print(
-                                f"Failed to get profile for {follower.account_handle}: {profile_resp.status_code}"
+                                f"Failed to get profile for {follower.account_handle}: HTTP {profile_resp.status_code}"
                             )
+                            try:
+                                error_data = profile_resp.json()
+                                print(f"Error details: {error_data}")
+                            except:
+                                print(f"Error body: {profile_resp.text[:200]}")
                             continue
 
                         target_did = profile_resp.json().get("did")
@@ -437,7 +436,7 @@ def execute_campaign_task(campaign_id: int) -> str:
                             continue
 
                         # Check if we're already following them
-                        following_url = f"https://bsky.social/xrpc/app.bsky.graph.getFollows?actor={campaign_user_did}&limit=100"
+                        following_url = f"{pds_url}/xrpc/app.bsky.graph.getFollows?actor={campaign_user_did}&limit=100"
                         follows_resp = pds_authed_req(
                             "GET",
                             following_url,
@@ -445,7 +444,7 @@ def execute_campaign_task(campaign_id: int) -> str:
                             dpop_private_jwk_json=dpop_private_jwk_json,
                             user_did=campaign_user_did,
                             db=db,
-                            dpop_pds_nonce=dpop_pds_nonce
+                            dpop_pds_nonce=dpop_pds_nonce,
                         )
 
                         already_following = False
@@ -470,14 +469,15 @@ def execute_campaign_task(campaign_id: int) -> str:
                                 "createdAt": datetime.utcnow().isoformat() + "Z",
                             }
 
-                            create_record_url = (
-                                "https://bsky.social/xrpc/com.atproto.repo.createRecord"
-                            )
+                            create_record_url = f"{pds_url}/xrpc/com.atproto.repo.createRecord"
                             create_record_payload = {
                                 "repo": campaign_user_did,
                                 "collection": "app.bsky.graph.follow",
                                 "record": follow_payload,
                             }
+
+                            print(f"Attempting to follow {follower.account_handle} (DID: {target_did})")
+                            print(f"Follow payload: {create_record_payload}")
 
                             follow_resp = pds_authed_req(
                                 "POST",
@@ -499,8 +499,21 @@ def execute_campaign_task(campaign_id: int) -> str:
                                 )
                             else:
                                 print(
-                                    f"Failed to follow {follower.account_handle}: {follow_resp.status_code}"
+                                    f"Failed to follow {follower.account_handle}: HTTP {follow_resp.status_code}"
                                 )
+
+                                # Add detailed error logging
+                                try:
+                                    error_data = follow_resp.json()
+                                    print(f"Follow error details: {error_data}")
+                                    if "message" in error_data:
+                                        print(f"Error message: {error_data['message']}")
+                                    if "error" in error_data:
+                                        print(f"Error type: {error_data['error']}")
+                                except Exception as e:
+                                    print(f"Could not parse error response as JSON: {e}")
+                                    print(f"Raw error response: {follow_resp.text[:500]}")
+
                                 if follow_resp.status_code == 429:
                                     print("Rate limited - waiting before continuing...")
                                     time.sleep(5)  # Wait 5 seconds for rate limiting
