@@ -1,3 +1,4 @@
+from datetime import datetime
 from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -15,6 +16,7 @@ from atproto_identity import (
 from atproto_oauth import (
     fetch_authserver_meta,
     initial_token_request,
+    refresh_token_request,
     resolve_pds_authserver,
     send_par_auth_request,
 )
@@ -324,3 +326,59 @@ def oauth_logout(
         {"message": "LOGOUT_SUCCESS"},
         status_code=200,
     )
+
+
+@router.get("/oauth/refresh")
+def oauth_refresh(
+    request: Request,
+    user=Depends(get_logged_in_user),
+    db: Session = Depends(get_db),
+    settings=Depends(get_settings)
+):
+    """
+    Refresh the OAuth tokens for the current user.
+
+    This endpoint refreshes the access token using the refresh token,
+    and updates the tokens in the PostgreSQL database.
+    """
+    try:
+        # Get the app URL from the request
+        app_url = str(request.url).replace("http://", "https://").split("/oauth/refresh")[0]
+
+        # Create user dict in the format expected by refresh_token_request
+        user_dict = {
+            "authserver_iss": user.authserver_iss,
+            "refresh_token": user.refresh_token,
+            "dpop_private_jwk": user.dpop_private_jwk,
+            "dpop_authserver_nonce": user.dpop_authserver_nonce,
+        }
+
+        # Request new tokens
+        tokens, dpop_authserver_nonce = refresh_token_request(
+            user_dict, app_url, settings.client_secret_jwk_obj
+        )
+
+        # Update the existing OAuth session with new tokens
+        user.access_token = tokens["access_token"]
+        user.refresh_token = tokens["refresh_token"]
+        user.dpop_authserver_nonce = dpop_authserver_nonce
+        user.updated_at = datetime.utcnow()
+
+        db.commit()
+
+        print(f"Token refreshed successfully for user: {user.did}")
+
+        return JSONResponse({
+            "message": "Token refreshed successfully",
+            "timestamp": user.updated_at.isoformat() if user.updated_at else None
+        })
+
+    except Exception as e:
+        print(f"Error refreshing token for user {user.did}: {e}")
+        db.rollback()
+        return JSONResponse(
+            {"error": "Failed to refresh token", "detail": str(e)},
+            status_code=500,
+        )
+    finally:
+        db.close()
