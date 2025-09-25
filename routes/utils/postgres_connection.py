@@ -2,9 +2,9 @@ from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy.schema import Column
+from sqlalchemy.schema import Column, ForeignKey
 from sqlalchemy.sql import text
-from sqlalchemy.types import DateTime, Integer, String, Text
+from sqlalchemy.types import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from settings import get_settings
@@ -72,6 +72,10 @@ class Campaign(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True)
+    user_did = Column(String(255), nullable=True, index=True)
+    total_followers_to_get = Column(Integer, nullable=True, default=0)
+    is_campaign_running = Column(Boolean, nullable=False, default=False)
+    is_setup_job_running = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     deleted_at = Column(DateTime, nullable=True)
     followers_to_get = Column(JSONB, nullable=True)
@@ -105,6 +109,41 @@ class OAuthSession(Base):
     access_token = Column(Text, nullable=False)
     refresh_token = Column(Text, nullable=False)
     dpop_authserver_nonce = Column(String(512), nullable=True)
+    dpop_pds_nonce = Column(String(512), nullable=True)
     dpop_private_jwk = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    did = Column(String(255), nullable=False, unique=True)
+    handle = Column(String(255), nullable=False)
+    avatar = Column(String(512), nullable=True)
+    display_name = Column(String(255), nullable=True)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class FollowersToGet(Base):
+    __tablename__ = "followers_to_get"
+
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(
+        Integer,
+        ForeignKey("campaigns.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    account_handle = Column(String(255), nullable=False, index=True)
+    me_following = Column(DateTime(timezone=True), nullable=True)
+    is_following_me = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )

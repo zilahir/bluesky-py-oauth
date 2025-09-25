@@ -348,16 +348,14 @@ def pds_dpop_jwt(
 
 
 # Helper to demonstrate making a request (HTTP GET or POST) to the user's PDS ("Resource Server" in OAuth terminology) using DPoP and access token.
-# This method returns a 'requests' reponse, without checking status code.
-def pds_authed_req(method: str, url: str, user: dict, db: Any, body=None) -> Any:
-    dpop_private_jwk = JsonWebKey.import_key(json.loads(user["dpop_private_jwk"]))
-    dpop_pds_nonce = user["dpop_pds_nonce"]
-    access_token = user["access_token"]
+# This method returns a 'requests' response, without checking status code.
+def pds_authed_req(method: str, url: str, access_token: str, dpop_private_jwk_json: str, user_did: str, db, dpop_pds_nonce: str = "", body=None) -> Any:
+    dpop_private_jwk = JsonWebKey.import_key(json.loads(dpop_private_jwk_json))
 
     # Might need to retry request with a new nonce.
     for i in range(2):
         dpop_jwt = pds_dpop_jwt(
-            "POST",
+            method.upper(),
             url,
             access_token,
             dpop_pds_nonce,
@@ -377,19 +375,33 @@ def pds_authed_req(method: str, url: str, user: dict, db: Any, body=None) -> Any
 
         # If we got a new server-provided DPoP nonce, store it in database and retry.
         # NOTE: the type of error might also be communicated in the `WWW-Authenticate` HTTP response header.
-        if resp.status_code in [400, 401] and resp.json()["error"] == "use_dpop_nonce":
-            # print(resp.headers)
-            dpop_pds_nonce = resp.headers["DPoP-Nonce"]
-            print(f"retrying with new PDS DPoP nonce: {dpop_pds_nonce}")
-            # update session database with new nonce
-            cur = db.cursor()
-            cur.execute(
-                "UPDATE oauth_session SET dpop_pds_nonce = ? WHERE did = ?;",
-                [dpop_pds_nonce, user["did"]],
-            )
-            db.commit()
-            cur.close()
-            continue
+        if resp.status_code in [400, 401]:
+            try:
+                error_data = resp.json()
+                if error_data.get("error") == "use_dpop_nonce":
+                    dpop_pds_nonce = resp.headers["DPoP-Nonce"]
+                    print(f"retrying with new PDS DPoP nonce: {dpop_pds_nonce}")
+
+                    # Update PostgreSQL database using SQLAlchemy
+                    try:
+                        # Import here to avoid circular imports
+                        from routes.utils.postgres_connection import OAuthSession
+
+                        # Update the session with new nonce
+                        oauth_session = db.query(OAuthSession).filter(OAuthSession.did == user_did).first()
+                        if oauth_session:
+                            oauth_session.dpop_pds_nonce = dpop_pds_nonce
+                            db.commit()
+
+                        continue
+                    except Exception as db_error:
+                        print(f"Error updating DPoP nonce in database: {db_error}")
+                        # Continue anyway, might still work
+                        continue
+            except (ValueError, KeyError):
+                # Response is not JSON or doesn't have expected structure
+                pass
+
         break
 
     return resp

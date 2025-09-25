@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     db_port: int = 5432
     dp_path: str = "demo.sqlite"
 
+    # Redis settings
+    redis_host: str = "localhost"
+    redis_port: int = 6279
+    redis_db: int = 0
+    redis_password: str = ""
+
     @property
     def client_secret_jwk_obj(self):
         return JsonWebKey.import_key(json.loads(self.client_secret_jwk))
