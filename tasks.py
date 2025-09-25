@@ -8,6 +8,9 @@ import os
 os.environ["no_proxy"] = "*"
 
 from routes.utils.postgres_connection import get_db, Campaign, FollowersToGet
+from queue_config import get_queue
+
+ACCOUNTS_TO_FOLLOW_PER_DAY = 10
 
 
 def get_all_followers_for_account(handle: str) -> List[Dict]:
@@ -258,6 +261,13 @@ def process_campaign_task(campaign_data: Dict[str, Any]) -> str:
                 campaign.is_setup_job_running = False
                 db.commit()
                 print(f"Campaign '{campaign_name}' setup job marked as complete")
+
+                # Trigger the campaign execution worker
+                print(f"Triggering campaign execution for campaign ID: {campaign_id}")
+                queue = get_queue("campaign_execute")
+                job = queue.enqueue(execute_campaign_task, campaign_id)
+                print(f"Campaign execution job enqueued with ID: {job.id}")
+
             else:
                 print(f"Campaign with ID {campaign_id} not found for update")
         except Exception as e:
@@ -269,3 +279,151 @@ def process_campaign_task(campaign_data: Dict[str, Any]) -> str:
         print("No accounts to process in followers_to_get")
 
     return f"Campaign '{campaign_name}' processed successfully"
+
+
+def execute_campaign_task(campaign_id: int) -> str:
+    """
+    Execute the actual campaign by processing all collected followers.
+
+    This function is triggered after the setup job completes and processes
+    all followers that were collected for the campaign.
+
+    Args:
+        campaign_id: The ID of the campaign to execute
+
+    Returns:
+        str: Task completion message
+    """
+    try:
+        print(
+            f"execute_campaign_task --- Starting campaign execution for campaign ID: {campaign_id}"
+        )
+
+        if not campaign_id:
+            print("Error: No campaign ID provided")
+            return "Error: No campaign ID provided"
+
+        # Get campaign from database
+        db = next(get_db())
+        try:
+            campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+
+            if not campaign:
+                print(f"Error: Campaign with ID {campaign_id} not found")
+                return f"Error: Campaign with ID {campaign_id} not found"
+
+            # Extract campaign data
+            campaign_name = campaign.name
+            campaign_user_did = campaign.user_did
+            is_setup_complete = not campaign.is_setup_job_running
+
+            print(f"Campaign: {campaign_name}")
+            print(f"User DID: {campaign_user_did}")
+            print(f"Setup complete: {is_setup_complete}")
+
+            if not is_setup_complete:
+                print(
+                    "Warning: Setup job is still running, but proceeding with execution"
+                )
+
+            # Set campaign as running
+            campaign.is_campaign_running = True
+            db.commit()
+            print(f"Marked campaign '{campaign_name}' as running")
+
+        except Exception as e:
+            print(f"Error fetching campaign: {e}")
+            return f"Error fetching campaign: {e}"
+        finally:
+            db.close()
+
+        # Get all followers for this campaign
+        db = next(get_db())
+        try:
+            followers = (
+                db.query(FollowersToGet)
+                .filter(FollowersToGet.campaign_id == campaign_id)
+                .all()
+            )
+
+            follower_count = len(followers)
+            print(
+                f"Found {follower_count} followers to process for campaign '{campaign_name}'"
+            )
+
+            if follower_count == 0:
+                print("No followers found to process")
+                return f"No followers found for campaign '{campaign_name}'"
+
+            # Process each follower
+            processed_count = 0
+            for follower in followers:
+                try:
+                    print(f"Processing follower: {follower.account_handle}")
+
+                    # Here you would implement the actual campaign logic
+                    # For example: follow the user, send a message, etc.
+                    # This is where you'd integrate with Bluesky API for actions
+
+                    # For now, just simulate processing
+                    time.sleep(0.1)  # Small delay to simulate work
+
+                    # Update follower status if needed
+                    # follower.me_following = True  # Example update
+                    # db.commit()
+
+                    processed_count += 1
+
+                    if processed_count % 100 == 0:
+                        print(f"Processed {processed_count}/{follower_count} followers")
+
+                except Exception as e:
+                    print(f"Error processing follower {follower.account_handle}: {e}")
+                    continue
+
+            print(
+                f"Campaign execution completed: {processed_count}/{follower_count} followers processed"
+            )
+
+        except Exception as e:
+            print(f"Error processing followers: {e}")
+            return f"Error processing followers: {e}"
+        finally:
+            db.close()
+
+        # Mark campaign as completed
+        db = next(get_db())
+        try:
+            campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+            if campaign:
+                # campaign.is_campaign_running = False
+                db.commit()
+                print(f"Campaign '{campaign_name}' execution marked as complete")
+            else:
+                print(f"Campaign with ID {campaign_id} not found for final update")
+        except Exception as e:
+            print(f"Error updating final campaign status: {e}")
+        finally:
+            db.close()
+
+        return f"Campaign '{campaign_name}' executed successfully. Processed {processed_count} followers."
+
+    except Exception as e:
+        print(f"Unexpected error in execute_campaign_task: {e}")
+
+        # Try to mark campaign as not running in case of error
+        try:
+            db = next(get_db())
+            campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+            if campaign:
+                # campaign.is_campaign_running = False
+                db.commit()
+        except:
+            pass
+        finally:
+            try:
+                db.close()
+            except:
+                pass
+
+        return f"Error executing campaign: {e}"

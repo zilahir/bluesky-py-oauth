@@ -15,9 +15,9 @@ from routes.utils.postgres_connection import get_db
 if __name__ == "__main__":
     redis_conn = get_redis_connection()
 
-    worker = Worker(["campaign_get_all_followers"], connection=redis_conn)
+    worker = Worker(["campaign_get_all_followers", "campaign_execute"], connection=redis_conn)
     print(
-        "Worker started. Listening for tasks on 'campaign_get_all_followers' queue..."
+        "Worker started. Listening for tasks on 'campaign_get_all_followers' and 'campaign_execute' queues..."
     )
     print("Press Ctrl+C to exit")
     worker.work()
