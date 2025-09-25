@@ -161,8 +161,8 @@ def save_followers_to_db(
                 new_follower = FollowersToGet(
                     campaign_id=campaign_id,
                     account_handle=follower_handle,
-                    me_following=False,  # Default values
-                    is_following_me=False,
+                    me_following=None,  # Will be set to timestamp when followed
+                    is_following_me=None,  # Will be set to timestamp when they follow back
                 )
                 db.add(new_follower)
 

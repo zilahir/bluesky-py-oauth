@@ -58,8 +58,8 @@ async def get_campaign(
             {
                 'id': follower.id,
                 'account_handle': follower.account_handle,
-                'me_following': follower.me_following,
-                'is_following_me': follower.is_following_me,
+                'me_following': follower.me_following.isoformat() if follower.me_following else None,
+                'is_following_me': follower.is_following_me.isoformat() if follower.is_following_me else None,
                 'created_at': follower.created_at.isoformat() if follower.created_at else None,
                 'updated_at': follower.updated_at.isoformat() if follower.updated_at else None
             }
