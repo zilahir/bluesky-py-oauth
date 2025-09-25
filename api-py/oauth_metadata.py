@@ -11,7 +11,7 @@ class OauthMetadata:
         print(f"Initializing OauthMetadata with environment: {env}")
         self.APP_URL = "https://app.example.com"
         self.is_dev = env == "development"
-        self.ORIGIN = "http://127.0.0.1:5000" if self.is_dev else self.APP_URL
+        self.ORIGIN = "http://127.0.0.1:5050" if self.is_dev else self.APP_URL
         self.REDIRECT_URI = abs_path("auth/oauth/callback", self.ORIGIN)
         self.SCOPE = "atproto transition:generic"
 
