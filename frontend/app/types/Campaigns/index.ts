@@ -13,3 +13,12 @@ export interface Campaign {
     updated_at: string;
   }[];
 }
+
+export interface CampaignFollowers {
+  id: string;
+  account_handle: string;
+  me_following: boolean;
+  is_following_me: boolean;
+  created_at: string;
+  updated_at: string;
+}
