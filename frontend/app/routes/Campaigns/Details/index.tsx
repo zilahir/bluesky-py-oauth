@@ -16,6 +16,8 @@ import {
   PopoverTrigger,
 } from "~/components/ui/popover";
 import { Button } from "~/components/ui/button";
+import { Badge } from "~/components/ui/badge";
+import AccountsToFollowTable from "~/components/AccountsToFollowTable";
 
 function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
   console.log("CampaignDetailsPage params:", params);
@@ -52,10 +54,20 @@ function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
         </Card>
       )}
       {!isLoading && data && !data?.is_setup_job_running && (
-        <div className="">
+        <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle className="capitalize">{data?.name}</CardTitle>
+              <CardTitle className="capitalize flex items-center flex-row gap-2">
+                <span>{data?.name}</span>
+                <span>
+                  {data?.is_campaign_running && (
+                    <Badge>
+                      <Loader2 className="animate-spin" />
+                      Running
+                    </Badge>
+                  )}
+                </span>
+              </CardTitle>
               <CardDescription>
                 {new Date(data?.created_at).toLocaleDateString("en-US", {
                   year: "numeric",
@@ -101,6 +113,12 @@ function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
               </div>
             </CardContent>
           </Card>
+          <div className="space-y-3">
+            <h1 className="text-xl font-semibold text-foreground">
+              Accounts to follow
+            </h1>
+            <AccountsToFollowTable data={data.followers} />
+          </div>
         </div>
       )}
     </div>
