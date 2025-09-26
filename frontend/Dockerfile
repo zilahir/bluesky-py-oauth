@@ -1,22 +1,17 @@
-FROM node:20-alpine AS development-dependencies-env
-COPY . /app
-WORKDIR /app
-RUN npm ci
-
-FROM node:20-alpine AS production-dependencies-env
-COPY ./package.json package-lock.json /app/
-WORKDIR /app
-RUN npm ci --omit=dev
-
-FROM node:20-alpine AS build-env
-COPY . /app/
-COPY --from=development-dependencies-env /app/node_modules /app/node_modules
-WORKDIR /app
-RUN npm run build
-
 FROM node:20-alpine
-COPY ./package.json package-lock.json /app/
-COPY --from=production-dependencies-env /app/node_modules /app/node_modules
-COPY --from=build-env /app/build /app/build
+
+RUN corepack enable && corepack prepare pnpm@9.9.0 --activate
+
 WORKDIR /app
-CMD ["npm", "run", "start"]
+
+COPY package.json pnpm-lock.yaml ./
+
+RUN pnpm install --frozen-lockfile
+
+COPY . .
+
+EXPOSE 5174
+
+# For development with hot reload using host node_modules
+# The dev command will use the node_modules from the host via volume mount
+CMD ["pnpm", "run", "dev", "--host", "0.0.0.0", "--port", "5174"]
