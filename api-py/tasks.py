@@ -20,15 +20,16 @@ from datetime import datetime
 ACCOUNTS_TO_FOLLOW_PER_DAY = 10
 
 
-def get_all_followers_for_account(handle: str) -> List[Dict]:
+def get_all_followers_for_account(handle: str, user_did: str = None) -> List[Dict]:
     """
     Fetch all followers for a given account handle using Bluesky API with pagination.
 
     Args:
         handle: The account handle to fetch followers for
+        user_did: Current user's DID to exclude from followers list
 
     Returns:
-        List of follower dictionaries
+        List of follower dictionaries (excludes current user if user_did provided)
     """
     try:
         print(
@@ -105,11 +106,39 @@ def get_all_followers_for_account(handle: str) -> List[Dict]:
                 data = resp.json()
 
                 page_followers = data.get("followers", [])
-                followers.extend(page_followers)
 
-                print(
-                    f"Fetched {len(page_followers)} followers on page {page_count}, total: {len(followers)}"
-                )
+                # Filter out current user if user_did is provided
+                if user_did:
+                    filtered_followers = []
+                    for follower in page_followers:
+                        follower_did = follower.get("did", "")
+                        follower_handle = follower.get("handle", "")
+
+                        # Skip if this follower is the current user (match by DID or handle)
+                        if follower_did == user_did:
+                            print(f"Excluding current user from followers (DID match): {follower_handle}")
+                            continue
+
+                        filtered_followers.append(follower)
+
+                    followers.extend(filtered_followers)
+
+                    excluded_count = len(page_followers) - len(filtered_followers)
+                    if excluded_count > 0:
+                        print(f"Excluded {excluded_count} follower(s) matching current user on page {page_count}")
+                else:
+                    followers.extend(page_followers)
+
+                # Calculate how many followers were actually added after filtering
+                if user_did:
+                    added_count = len(filtered_followers)
+                    print(
+                        f"Fetched {len(page_followers)} followers on page {page_count} ({added_count} after filtering), total: {len(followers)}"
+                    )
+                else:
+                    print(
+                        f"Fetched {len(page_followers)} followers on page {page_count}, total: {len(followers)}"
+                    )
 
                 cursor = data.get("cursor", None)
 
@@ -262,7 +291,7 @@ def process_campaign_task(campaign_data: Dict[str, Any]) -> str:
                 print(f"\nProcessing account: {account_handle}")
 
                 # Fetch all followers for this account
-                followers = get_all_followers_for_account(account_handle)
+                followers = get_all_followers_for_account(account_handle, campaign_user_did)
 
                 if followers:
                     # Save followers to database
