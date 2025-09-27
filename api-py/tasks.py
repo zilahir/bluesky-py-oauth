@@ -5,6 +5,9 @@ from requests import request as req
 from sqlalchemy.orm import Session
 import os
 
+# Import metrics tracking functions
+from metrics import track_rq_job, track_followers_processed
+
 os.environ["no_proxy"] = "*"
 
 from routes.utils.postgres_connection import (
@@ -216,6 +219,9 @@ def save_followers_to_db(
                 f"Successfully added {len(new_followers)} new followers for {account_handle}"
             )
             print(f"Skipped {len(followers) - len(new_followers)} existing followers")
+
+            # Track followers processed
+            track_followers_processed(str(campaign_id), len(new_followers))
         else:
             print(
                 f"All {len(followers)} followers for {account_handle} already exist in database"
@@ -224,6 +230,8 @@ def save_followers_to_db(
     except Exception as e:
         print(f"Error saving followers for {account_handle}: {e}")
         db.rollback()
+        # Track error
+        track_rq_job("campaign_get_all_followers", "error")
         raise e
     finally:
         db.close()
@@ -305,6 +313,9 @@ def process_campaign_task(campaign_data: Dict[str, Any]) -> str:
                 continue  # Continue with next account
 
         print(f"\nCompleted processing all accounts for campaign: {campaign_name}")
+
+        # Track successful completion
+        track_rq_job("campaign_get_all_followers", "success")
 
         # set the is_setup_job_running to False on the campaign
         db = next(get_db())

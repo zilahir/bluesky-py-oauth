@@ -34,6 +34,7 @@ from oauth_metadata import OauthMetadata
 from routes import api, auth, me, test
 from routes.utils.postgres_connection import get_db
 from settings import get_settings
+from metrics import metrics_middleware, get_metrics
 
 app = FastAPI()
 
@@ -59,6 +60,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add Prometheus metrics middleware
+app.middleware("http")(metrics_middleware)
 
 
 # This is a "confidential" OAuth client, meaning it has access to a persistent secret signing key. parse that key as a global.
@@ -235,6 +239,13 @@ def oauth_logout(request: Request, user=Depends(get_logged_in_user)):
     query_db("DELETE FROM oauth_session WHERE did = ?;", [user["did"]])
     request.session.clear()
     return RedirectResponse(url="/")
+
+
+# Prometheus metrics endpoint
+@app.get("/metrics")
+def metrics_endpoint():
+    """Endpoint for Prometheus to scrape metrics"""
+    return get_metrics()
 
 
 app.include_router(auth.router)
