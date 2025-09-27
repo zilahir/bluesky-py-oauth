@@ -7,7 +7,11 @@ from atproto_oauth import pds_authed_req
 from routes.utils.get_db import get_db
 from routes.utils.get_user import get_logged_in_user
 from requests import HTTPError, request as req
-from routes.utils.postgres_connection import Campaign, FollowersToGet, get_db as get_pg_db
+from routes.utils.postgres_connection import (
+    Campaign,
+    FollowersToGet,
+    get_db as get_pg_db,
+)
 from queue_config import get_queue
 from tasks import process_campaign_task
 
@@ -51,23 +55,31 @@ async def get_campaign(
         campaign_data = campaign.__dict__.copy()
 
         # Remove SQLAlchemy internal state
-        campaign_data.pop('_sa_instance_state', None)
+        campaign_data.pop("_sa_instance_state", None)
 
         # Add followers data
-        campaign_data['followers'] = [
+        campaign_data["followers"] = [
             {
-                'id': follower.id,
-                'account_handle': follower.account_handle,
-                'me_following': follower.me_following.isoformat() if follower.me_following else None,
-                'is_following_me': follower.is_following_me.isoformat() if follower.is_following_me else None,
-                'created_at': follower.created_at.isoformat() if follower.created_at else None,
-                'updated_at': follower.updated_at.isoformat() if follower.updated_at else None
+                "id": follower.id,
+                "account_handle": follower.account_handle,
+                "me_following": follower.me_following.isoformat()
+                if follower.me_following
+                else None,
+                "is_following_me": follower.is_following_me.isoformat()
+                if follower.is_following_me
+                else None,
+                "created_at": follower.created_at.isoformat()
+                if follower.created_at
+                else None,
+                "updated_at": follower.updated_at.isoformat()
+                if follower.updated_at
+                else None,
             }
             for follower in followers
         ]
 
         # Add followers count
-        campaign_data['followers_count'] = len(followers)
+        campaign_data["followers_count"] = len(followers)
 
         return {
             "data": campaign_data,
@@ -92,6 +104,47 @@ async def get_campaigns(
 
         return {
             "data": [campaign.__dict__ for campaign in campaigns],
+        }
+    finally:
+        db.close()
+
+
+@router.delete("/campaign/{campaign_id}")
+async def delete_campaign(
+    campaign_id: int,
+    user=Depends(get_logged_in_user),
+    db: Session = Depends(get_pg_db),
+):
+    """
+    Delete a specific campaign by ID for the logged-in user.
+    """
+    try:
+        if not user:
+            raise HTTPError("Authentication required")
+
+        if not campaign_id:
+            raise HTTPError("Campaign ID is required")
+
+        campaign = (
+            db.query(Campaign)
+            .filter(Campaign.id == campaign_id, Campaign.user_did == user.did)
+            .first()
+        )
+
+        if not campaign:
+            raise HTTPError("Campaign not found")
+
+        # Delete all followers associated with this campaign
+        db.query(FollowersToGet).filter(
+            FollowersToGet.campaign_id == campaign_id
+        ).delete()
+
+        # Delete the campaign itself
+        db.delete(campaign)
+        db.commit()
+
+        return {
+            "message": "Campaign deleted successfully",
         }
     finally:
         db.close()

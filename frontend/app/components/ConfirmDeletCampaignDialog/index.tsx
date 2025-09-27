@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import { useState } from "react";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -8,8 +8,10 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Button } from "../ui/button";
+import useDeleteCampaign from "~/hooks/useDeleteCampaign";
 
 interface IConfirmDeleteCampaignDialog {
+  campaignId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm?: () => void;
@@ -18,8 +20,16 @@ interface IConfirmDeleteCampaignDialog {
 function ConfirmDeleteCampaignDialog({
   open,
   onOpenChange,
-  onConfirm,
+  campaignId,
 }: IConfirmDeleteCampaignDialog): ReactElement {
+  const { mutateAsync: deleteCampaign } = useDeleteCampaign({
+    campaignId,
+    onSuccess: () => {
+      toast.success("Campaign deleted successfully!");
+      onOpenChange(false);
+    },
+  });
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
@@ -32,17 +42,13 @@ function ConfirmDeleteCampaignDialog({
         </DialogHeader>
 
         <div className="flex justify-end space-x-2">
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-          >
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
           <Button
             variant="destructive"
             onClick={() => {
-              onConfirm?.();
-              onOpenChange(false);
+              deleteCampaign();
             }}
           >
             Delete Campaign

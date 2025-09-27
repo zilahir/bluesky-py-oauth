@@ -31,13 +31,6 @@ function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
     id,
   });
 
-  const handleDeleteCampaign = () => {
-    // Add your delete campaign logic here
-    console.log("Deleting campaign:", id);
-    // Example: call your delete API
-    // deleteCampaign(id);
-  };
-
   if (isLoading) {
     return (
       <div>
@@ -151,7 +144,7 @@ function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
       <ConfirmDeleteCampaignDialog
         open={isDeleteDialogOpen}
         onOpenChange={setIsDeleteDialogOpen}
-        onConfirm={handleDeleteCampaign}
+        campaignId={id}
       />
     </>
   );
