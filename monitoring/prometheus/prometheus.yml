@@ -9,7 +9,7 @@ rule_files:
 scrape_configs:
   - job_name: 'prometheus'
     static_configs:
-      - targets: ['localhost:9090']
+      - targets: ['localhost:9090']  # Internal port within container
 
   - job_name: 'bluesky-api'
     static_configs:
@@ -18,9 +18,5 @@ scrape_configs:
     metrics_path: '/metrics'
     scrape_timeout: 10s
 
-  - job_name: 'bluesky-worker'
-    static_configs:
-      - targets: ['worker:8000']  # We'll add metrics endpoint to worker later
-    scrape_interval: 30s
-    metrics_path: '/metrics'
-    scrape_timeout: 10s
+  # Worker metrics are tracked via API since worker doesn't expose HTTP endpoint
+  # RQ job metrics are collected through the API's /metrics endpoint
