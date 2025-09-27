@@ -1,4 +1,4 @@
-import { type ReactElement } from "react";
+import { type ReactElement, useState } from "react";
 import type { Route } from "./+types";
 import useCampaign from "~/hooks/useCampaign";
 import { EllipsisIcon, Loader2 } from "lucide-react";
@@ -25,10 +25,18 @@ import ConfirmDeleteCampaignDialog from "~/components/ConfirmDeletCampaignDialog
 
 function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
   const { id } = params;
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
   const { data, isLoading } = useCampaign({
     id,
   });
+
+  const handleDeleteCampaign = () => {
+    // Add your delete campaign logic here
+    console.log("Deleting campaign:", id);
+    // Example: call your delete API
+    // deleteCampaign(id);
+  };
 
   if (isLoading) {
     return (
@@ -89,11 +97,14 @@ function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
                     <DropdownMenuContent align="end">
                       <DropdownMenuLabel>Actions</DropdownMenuLabel>
                       <DropdownMenuSeparator />
-                      <ConfirmDeleteCampaignDialog
-                        dialogTrigger={
-                          <DropdownMenuItem>Delete Campaign</DropdownMenuItem>
-                        }
-                      />
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setIsDeleteDialogOpen(true);
+                        }}
+                      >
+                        Delete Campaign
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </CardAction>
@@ -136,6 +147,12 @@ function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
           </div>
         )}
       </div>
+
+      <ConfirmDeleteCampaignDialog
+        open={isDeleteDialogOpen}
+        onOpenChange={setIsDeleteDialogOpen}
+        onConfirm={handleDeleteCampaign}
+      />
     </>
   );
 }

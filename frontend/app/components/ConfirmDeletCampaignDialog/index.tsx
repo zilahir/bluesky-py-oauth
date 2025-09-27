@@ -1,23 +1,27 @@
 import type { ReactElement } from "react";
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "../ui/dialog";
+import { Button } from "../ui/button";
 
 interface IConfirmDeleteCampaignDialog {
-  dialogTrigger: ReactElement;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm?: () => void;
 }
 
 function ConfirmDeleteCampaignDialog({
-  dialogTrigger,
+  open,
+  onOpenChange,
+  onConfirm,
 }: IConfirmDeleteCampaignDialog): ReactElement {
   return (
-    <Dialog>
-      <DialogTrigger asChild>{dialogTrigger}</DialogTrigger>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>Confirm Delete Campaign</DialogTitle>
@@ -27,7 +31,23 @@ function ConfirmDeleteCampaignDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div></div>
+        <div className="flex justify-end space-x-2">
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={() => {
+              onConfirm?.();
+              onOpenChange(false);
+            }}
+          >
+            Delete Campaign
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   );
