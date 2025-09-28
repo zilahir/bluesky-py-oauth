@@ -42,6 +42,29 @@ followers_processed_total = Counter(
     ['campaign_id']
 )
 
+unfollows_processed_total = Counter(
+    'unfollows_processed_total',
+    'Total number of unfollows processed',
+    ['campaign_id']
+)
+
+follow_backs_detected_total = Counter(
+    'follow_backs_detected_total',
+    'Total number of follow-backs detected',
+    ['campaign_id']
+)
+
+daily_campaign_executions_total = Counter(
+    'daily_campaign_executions_total',
+    'Total number of daily campaign executions',
+    ['status']  # success, failed, partial
+)
+
+active_campaigns_gauge = Gauge(
+    'active_campaigns_count',
+    'Number of currently active campaigns'
+)
+
 # Middleware for tracking HTTP requests
 async def metrics_middleware(request: Request, call_next):
     """FastAPI middleware to collect HTTP metrics"""
@@ -87,6 +110,22 @@ def track_rq_job(queue_name: str, status: str):
 def track_followers_processed(campaign_id: str, count: int = 1):
     """Track followers processed for a campaign"""
     followers_processed_total.labels(campaign_id=campaign_id).inc(count)
+
+def track_unfollows_processed(campaign_id: str, count: int = 1):
+    """Track unfollows processed for a campaign"""
+    unfollows_processed_total.labels(campaign_id=campaign_id).inc(count)
+
+def track_follow_backs_detected(campaign_id: str, count: int = 1):
+    """Track follow-backs detected for a campaign"""
+    follow_backs_detected_total.labels(campaign_id=campaign_id).inc(count)
+
+def track_daily_campaign_execution(status: str = "success"):
+    """Track daily campaign execution"""
+    daily_campaign_executions_total.labels(status=status).inc()
+
+def update_active_campaigns_count(count: int):
+    """Update the number of active campaigns"""
+    active_campaigns_gauge.set(count)
 
 def update_worker_count(count: int):
     """Update the number of active workers"""
