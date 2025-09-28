@@ -45,7 +45,7 @@ services:
     build:
       context: ./api-py
       dockerfile: Dockerfile
-    command: python worker.py
+    command: python -u worker.py
     env_file:
       - ./api-py/.env
     volumes:
@@ -71,7 +71,7 @@ services:
     build:
       context: ./api-py
       dockerfile: Dockerfile
-    command: python worker.py --scheduler
+    command: python -u worker.py --scheduler
     env_file:
       - ./api-py/.env
     volumes:

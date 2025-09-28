@@ -4,6 +4,7 @@ Campaign Scheduler
 This module handles scheduling of daily campaign executions using APScheduler.
 It can run as a separate worker process to maintain campaign schedules.
 """
+
 import atexit
 from datetime import datetime
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -14,6 +15,7 @@ from apscheduler.triggers.cron import CronTrigger
 # Check APScheduler version for compatibility
 try:
     import apscheduler
+
     print(f"Using APScheduler version: {apscheduler.__version__}")
 except:
     print("Could not detect APScheduler version")
@@ -21,6 +23,43 @@ except:
 from queue_config import get_redis_connection
 from campaign_config import CampaignConfig
 from daily_campaign_worker import process_daily_campaigns
+
+
+def execute_daily_campaigns():
+    """Execute daily campaigns - wrapper for logging"""
+    try:
+        print(f"Scheduled daily campaign execution starting at {datetime.utcnow()}")
+        result = process_daily_campaigns()
+        print(f"Scheduled daily campaign execution completed: {result}")
+    except Exception as e:
+        print(f"Error in scheduled daily campaign execution: {e}")
+        raise
+
+
+def test_job():
+    """Test job for development - remove in production"""
+    print(f"Test job executed at {datetime.utcnow()}")
+
+
+def execute_single_campaign(campaign_id: int):
+    """Execute a single campaign"""
+    try:
+        from daily_campaign_worker import DailyCampaignWorker
+        from routes.utils.postgres_connection import get_db
+
+        print(f"Executing single campaign {campaign_id}")
+
+        worker = DailyCampaignWorker()
+        db = next(get_db())
+        try:
+            result = worker.process_single_campaign(campaign_id, db)
+            print(f"Single campaign {campaign_id} execution completed: {result}")
+        finally:
+            db.close()
+
+    except Exception as e:
+        print(f"Error executing single campaign {campaign_id}: {e}")
+        raise
 
 
 class CampaignScheduler:
@@ -38,29 +77,31 @@ class CampaignScheduler:
             redis_conn = get_redis_connection()
 
             jobstores = {
-                'default': RedisJobStore(
-                    host=redis_conn.connection_pool.connection_kwargs['host'],
-                    port=redis_conn.connection_pool.connection_kwargs['port'],
-                    db=redis_conn.connection_pool.connection_kwargs['db'],
-                    password=redis_conn.connection_pool.connection_kwargs.get('password')
+                "default": RedisJobStore(
+                    host=redis_conn.connection_pool.connection_kwargs["host"],
+                    port=redis_conn.connection_pool.connection_kwargs["port"],
+                    db=redis_conn.connection_pool.connection_kwargs["db"],
+                    password=redis_conn.connection_pool.connection_kwargs.get(
+                        "password"
+                    ),
                 )
             }
 
             executors = {
-                'default': ThreadPoolExecutor(20),
+                "default": ThreadPoolExecutor(20),
             }
 
             job_defaults = {
-                'coalesce': True,  # Combine multiple pending executions into one
-                'max_instances': 1,  # Only allow one instance at a time
-                'misfire_grace_time': 300  # Allow 5 minutes grace for missed executions
+                "coalesce": True,  # Combine multiple pending executions into one
+                "max_instances": 1,  # Only allow one instance at a time
+                "misfire_grace_time": 300,  # Allow 5 minutes grace for missed executions
             }
 
             self.scheduler = BlockingScheduler(
                 jobstores=jobstores,
                 executors=executors,
                 job_defaults=job_defaults,
-                timezone='UTC'
+                timezone="UTC",
             )
 
             print("Campaign scheduler initialized with Redis jobstore")
@@ -68,7 +109,7 @@ class CampaignScheduler:
         except Exception as e:
             print(f"Error setting up scheduler with Redis, falling back to memory: {e}")
             # Fallback to in-memory scheduler
-            self.scheduler = BlockingScheduler(timezone='UTC')
+            self.scheduler = BlockingScheduler(timezone="UTC")
 
     def start_scheduler(self):
         """Start the campaign scheduler"""
@@ -77,34 +118,36 @@ class CampaignScheduler:
 
             # Add daily campaign processing job
             self.scheduler.add_job(
-                func=self._execute_daily_campaigns,
+                func=execute_daily_campaigns,
                 trigger=CronTrigger(
                     hour=self.config.DAILY_EXECUTION_HOUR,
-                    minute=self.config.DAILY_EXECUTION_MINUTE
+                    minute=self.config.DAILY_EXECUTION_MINUTE,
                 ),
-                id='daily_campaign_processor',
-                name='Daily Campaign Processor',
-                replace_existing=True
+                id="daily_campaign_processor",
+                name="Daily Campaign Processor",
+                replace_existing=True,
             )
             print("✓ Daily campaign processor job added")
 
-            # Add a test job that runs every 5 minutes for testing
+            # Add a test job that runs every 1 minutes for testing
             # Remove this in production
             self.scheduler.add_job(
-                func=self._test_job,
-                trigger=CronTrigger(minute='*/5'),  # Every 5 minutes
-                id='test_campaign_job',
-                name='Test Campaign Job',
-                replace_existing=True
+                func=test_job,
+                trigger=CronTrigger(minute="*/1"),  # Every 1 minutes
+                id="test_campaign_job",
+                name="Test Campaign Job",
+                replace_existing=True,
             )
             print("✓ Test job added (every 5 minutes)")
 
-            print(f"Campaign scheduler started. Daily execution at {self.config.DAILY_EXECUTION_HOUR:02d}:{self.config.DAILY_EXECUTION_MINUTE:02d} UTC")
+            print(
+                f"Campaign scheduler started. Daily execution at {self.config.DAILY_EXECUTION_HOUR:02d}:{self.config.DAILY_EXECUTION_MINUTE:02d} UTC"
+            )
             print("Scheduled jobs:")
             for job in self.scheduler.get_jobs():
                 try:
                     # Handle different APScheduler versions
-                    next_run = getattr(job, 'next_run_time', 'N/A')
+                    next_run = getattr(job, "next_run_time", "N/A")
                     print(f"  - {job.name} (ID: {job.id}) - Next run: {next_run}")
                 except AttributeError:
                     print(f"  - {job.name} (ID: {job.id}) - Next run: N/A")
@@ -112,26 +155,17 @@ class CampaignScheduler:
             # Register shutdown handler
             atexit.register(self.shutdown_scheduler)
 
+            print(
+                ">>> Listing jobs before starting scheduler (to check Redis jobstore)"
+            )
+            self.list_jobs()
+
             # Start scheduler (blocking)
             self.scheduler.start()
 
         except Exception as e:
             print(f"Error starting campaign scheduler: {e}")
             raise
-
-    def _execute_daily_campaigns(self):
-        """Execute daily campaigns - wrapper for logging"""
-        try:
-            print(f"Scheduled daily campaign execution starting at {datetime.utcnow()}")
-            result = process_daily_campaigns()
-            print(f"Scheduled daily campaign execution completed: {result}")
-        except Exception as e:
-            print(f"Error in scheduled daily campaign execution: {e}")
-            raise
-
-    def _test_job(self):
-        """Test job for development - remove in production"""
-        print(f"Test job executed at {datetime.utcnow()}")
 
     def shutdown_scheduler(self):
         """Gracefully shutdown the scheduler"""
@@ -146,13 +180,13 @@ class CampaignScheduler:
 
         try:
             self.scheduler.add_job(
-                func=self._execute_single_campaign,
-                trigger='date',
+                func=execute_single_campaign,
+                trigger="date",
                 run_date=execution_time,
                 args=[campaign_id],
                 id=job_id,
-                name=f'Campaign {campaign_id} Execution',
-                replace_existing=True
+                name=f"Campaign {campaign_id} Execution",
+                replace_existing=True,
             )
             print(f"Added one-time job for campaign {campaign_id} at {execution_time}")
             return job_id
@@ -160,40 +194,22 @@ class CampaignScheduler:
             print(f"Error adding one-time job for campaign {campaign_id}: {e}")
             return None
 
-    def _execute_single_campaign(self, campaign_id: int):
-        """Execute a single campaign"""
-        try:
-            from daily_campaign_worker import DailyCampaignWorker
-            from routes.utils.postgres_connection import get_db
-
-            print(f"Executing single campaign {campaign_id}")
-
-            worker = DailyCampaignWorker()
-            db = next(get_db())
-            try:
-                result = worker.process_single_campaign(campaign_id, db)
-                print(f"Single campaign {campaign_id} execution completed: {result}")
-            finally:
-                db.close()
-
-        except Exception as e:
-            print(f"Error executing single campaign {campaign_id}: {e}")
-            raise
-
     def list_jobs(self):
         """List all scheduled jobs"""
         jobs = self.scheduler.get_jobs()
         print(f"Scheduled jobs ({len(jobs)}):")
         for job in jobs:
             try:
-                next_run = getattr(job, 'next_run_time', 'N/A')
-                trigger = getattr(job, 'trigger', 'N/A')
+                next_run = getattr(job, "next_run_time", "N/A")
+                trigger = getattr(job, "trigger", "N/A")
                 print(f"  - {job.name} (ID: {job.id})")
                 print(f"    Next run: {next_run}")
                 print(f"    Trigger: {trigger}")
                 print()
             except AttributeError as e:
-                print(f"  - {job.name} (ID: {job.id}) - Error accessing job details: {e}")
+                print(
+                    f"  - {job.name} (ID: {job.id}) - Error accessing job details: {e}"
+                )
                 print()
 
     def remove_job(self, job_id: str):
@@ -223,3 +239,4 @@ def start_campaign_scheduler():
 
 if __name__ == "__main__":
     start_campaign_scheduler()
+

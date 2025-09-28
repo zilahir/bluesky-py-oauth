@@ -10,6 +10,7 @@ Options:
 
 This will start a worker that listens for tasks in campaign queues.
 """
+
 import sys
 from rq import Worker
 from queue_config import get_redis_connection
@@ -24,7 +25,7 @@ def start_rq_worker():
     queues = [
         "campaign_get_all_followers",
         "campaign_execute",
-        "campaign_daily_execution"  # New queue for daily processing
+        "campaign_daily_execution",
     ]
 
     worker = Worker(queues, connection=redis_conn)
@@ -36,6 +37,7 @@ def start_rq_worker():
 def start_scheduler():
     """Start the campaign scheduler"""
     from campaign_scheduler import start_campaign_scheduler
+
     start_campaign_scheduler()
 
 
@@ -46,4 +48,3 @@ if __name__ == "__main__":
     else:
         print("Starting RQ Worker...")
         start_rq_worker()
-

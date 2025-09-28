@@ -8,7 +8,7 @@ interface IUseDeleteCampaign {
 }
 
 async function deleteCampaign(campaignId: string): Promise<void> {
-  const response = await apiClient.delete(`/campaigns/${campaignId}`);
+  const response = await apiClient.delete(`/api/campaign/${campaignId}`);
   return response.data;
 }
 

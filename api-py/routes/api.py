@@ -14,6 +14,7 @@ from routes.utils.postgres_connection import (
 )
 from queue_config import get_queue
 from tasks import process_campaign_task
+from scheduler_utils import remove_campaign_jobs
 
 
 router = APIRouter(prefix="/api", include_in_schema=False)
@@ -134,6 +135,20 @@ async def delete_campaign(
         if not campaign:
             raise HTTPError("Campaign not found")
 
+        # Remove any scheduled jobs for this campaign
+        try:
+            scheduler_cleanup_success = remove_campaign_jobs(campaign_id)
+            if scheduler_cleanup_success:
+                print(f"Successfully removed scheduled jobs for campaign {campaign_id}")
+            else:
+                print(
+                    f"Warning: Could not remove all scheduled jobs for campaign {campaign_id}"
+                )
+        except Exception as e:
+            print(
+                f"Warning: Error during scheduler cleanup for campaign {campaign_id}: {e}"
+            )
+
         # Delete all followers associated with this campaign
         db.query(FollowersToGet).filter(
             FollowersToGet.campaign_id == campaign_id
@@ -188,7 +203,7 @@ async def new_campaign(
         new_id = result.scalar_one()
         db.commit()
 
-        ## add the new campaiign id to the body
+        ## add the new campaign id to the body
         body["campaign_id"] = new_id
 
         # Enqueue the campaign processing task

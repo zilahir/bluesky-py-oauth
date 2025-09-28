@@ -9,6 +9,7 @@ import {
 } from "../ui/dialog";
 import { Button } from "../ui/button";
 import useDeleteCampaign from "~/hooks/useDeleteCampaign";
+import { useNavigate } from "react-router";
 
 interface IConfirmDeleteCampaignDialog {
   campaignId: string;
@@ -22,11 +23,13 @@ function ConfirmDeleteCampaignDialog({
   onOpenChange,
   campaignId,
 }: IConfirmDeleteCampaignDialog): ReactElement {
-  const { mutateAsync: deleteCampaign } = useDeleteCampaign({
+  const navigate = useNavigate();
+  const { mutate: deleteCampaign } = useDeleteCampaign({
     campaignId,
     onSuccess: () => {
-      toast.success("Campaign deleted successfully!");
       onOpenChange(false);
+      toast.success("Campaign deleted successfully!");
+      navigate("/");
     },
   });
 
