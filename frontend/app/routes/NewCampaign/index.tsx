@@ -194,7 +194,10 @@ function NewCampaignPage(): ReactElement {
                     </div>
                   )}
                   <div className="flex flex-row justify-end">
-                    <Button disabled={isPending || isLoading} type="submit">
+                    <Button
+                      disabled={isPending || isLoading || accounts.length === 0}
+                      type="submit"
+                    >
                       {isPending && (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       )}

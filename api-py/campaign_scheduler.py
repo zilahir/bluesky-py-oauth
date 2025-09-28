@@ -29,11 +29,15 @@ from logger_config import scheduler_logger, log_exception, log_scheduler_event
 def execute_daily_campaigns():
     """Execute daily campaigns - wrapper for logging"""
     try:
-        scheduler_logger.info(f"Scheduled daily campaign execution starting at {datetime.utcnow()}")
+        scheduler_logger.info(
+            f"Scheduled daily campaign execution starting at {datetime.utcnow()}"
+        )
         result = process_daily_campaigns()
         scheduler_logger.info(f"Scheduled daily campaign execution completed: {result}")
     except Exception as e:
-        log_exception(scheduler_logger, "Error in scheduled daily campaign execution", e)
+        log_exception(
+            scheduler_logger, "Error in scheduled daily campaign execution", e
+        )
         raise
 
 
@@ -54,12 +58,16 @@ def execute_single_campaign(campaign_id: int):
         db = next(get_db())
         try:
             result = worker.process_single_campaign(campaign_id, db)
-            scheduler_logger.info(f"Single campaign {campaign_id} execution completed: {result}")
+            scheduler_logger.info(
+                f"Single campaign {campaign_id} execution completed: {result}"
+            )
         finally:
             db.close()
 
     except Exception as e:
-        log_exception(scheduler_logger, f"Error executing single campaign {campaign_id}", e)
+        log_exception(
+            scheduler_logger, f"Error executing single campaign {campaign_id}", e
+        )
         raise
 
 
@@ -108,7 +116,9 @@ class CampaignScheduler:
             scheduler_logger.info("Campaign scheduler initialized with Redis jobstore")
 
         except Exception as e:
-            scheduler_logger.warning(f"Error setting up scheduler with Redis, falling back to memory: {e}")
+            scheduler_logger.warning(
+                f"Error setting up scheduler with Redis, falling back to memory: {e}"
+            )
             # Fallback to in-memory scheduler
             self.scheduler = BlockingScheduler(timezone="UTC")
 
@@ -149,9 +159,13 @@ class CampaignScheduler:
                 try:
                     # Handle different APScheduler versions
                     next_run = getattr(job, "next_run_time", "N/A")
-                    scheduler_logger.info(f"  - {job.name} (ID: {job.id}) - Next run: {next_run}")
+                    scheduler_logger.info(
+                        f"  - {job.name} (ID: {job.id}) - Next run: {next_run}"
+                    )
                 except AttributeError:
-                    scheduler_logger.info(f"  - {job.name} (ID: {job.id}) - Next run: N/A")
+                    scheduler_logger.info(
+                        f"  - {job.name} (ID: {job.id}) - Next run: N/A"
+                    )
 
             # Register shutdown handler
             atexit.register(self.shutdown_scheduler)
@@ -189,10 +203,17 @@ class CampaignScheduler:
                 name=f"Campaign {campaign_id} Execution",
                 replace_existing=True,
             )
-            log_scheduler_event(job_id, f"Added one-time job for campaign {campaign_id} at {execution_time}")
+            log_scheduler_event(
+                job_id,
+                f"Added one-time job for campaign {campaign_id} at {execution_time}",
+            )
             return job_id
         except Exception as e:
-            log_exception(scheduler_logger, f"Error adding one-time job for campaign {campaign_id}", e)
+            log_exception(
+                scheduler_logger,
+                f"Error adding one-time job for campaign {campaign_id}",
+                e,
+            )
             return None
 
     def list_jobs(self):
@@ -238,4 +259,3 @@ def start_campaign_scheduler():
 
 if __name__ == "__main__":
     start_campaign_scheduler()
-

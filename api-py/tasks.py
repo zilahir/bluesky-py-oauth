@@ -120,7 +120,9 @@ def get_all_followers_for_account(handle: str, user_did: str = None) -> List[Dic
 
                         # Skip if this follower is the current user (match by DID or handle)
                         if follower_did == user_did:
-                            print(f"Excluding current user from followers (DID match): {follower_handle}")
+                            print(
+                                f"Excluding current user from followers (DID match): {follower_handle}"
+                            )
                             continue
 
                         filtered_followers.append(follower)
@@ -129,7 +131,9 @@ def get_all_followers_for_account(handle: str, user_did: str = None) -> List[Dic
 
                     excluded_count = len(page_followers) - len(filtered_followers)
                     if excluded_count > 0:
-                        print(f"Excluded {excluded_count} follower(s) matching current user on page {page_count}")
+                        print(
+                            f"Excluded {excluded_count} follower(s) matching current user on page {page_count}"
+                        )
                 else:
                     followers.extend(page_followers)
 
@@ -300,7 +304,9 @@ def process_campaign_task(campaign_data: Dict[str, Any]) -> str:
                 print(f"\nProcessing account: {account_handle}")
 
                 # Fetch all followers for this account
-                followers = get_all_followers_for_account(account_handle, campaign_user_did)
+                followers = get_all_followers_for_account(
+                    account_handle, campaign_user_did
+                )
 
                 if followers:
                     # Save followers to database
@@ -413,12 +419,13 @@ def execute_campaign_task(campaign_id: int) -> str:
             )
 
             follower_count = len(followers)
-            print(
+
+            task_logger.info(
                 f"Found {follower_count} followers to process for campaign '{campaign_name}'"
             )
 
             if follower_count == 0:
-                print("No followers found to process")
+                task_logger.info(f"No followers found for campaign '{campaign_name}'")
                 return f"No followers found for campaign '{campaign_name}'"
 
             # Get user's OAuth session for API authentication
@@ -428,7 +435,7 @@ def execute_campaign_task(campaign_id: int) -> str:
                 .first()
             )
             if not oauth_session:
-                print(
+                task_logger.error(
                     f"Error: No OAuth session found for user DID: {campaign_user_did}"
                 )
                 return f"Error: No OAuth session found for user"
@@ -510,14 +517,18 @@ def execute_campaign_task(campaign_id: int) -> str:
                                 "createdAt": datetime.utcnow().isoformat() + "Z",
                             }
 
-                            create_record_url = f"{pds_url}/xrpc/com.atproto.repo.createRecord"
+                            create_record_url = (
+                                f"{pds_url}/xrpc/com.atproto.repo.createRecord"
+                            )
                             create_record_payload = {
                                 "repo": campaign_user_did,
                                 "collection": "app.bsky.graph.follow",
                                 "record": follow_payload,
                             }
 
-                            print(f"Attempting to follow {follower.account_handle} (DID: {target_did})")
+                            print(
+                                f"Attempting to follow {follower.account_handle} (DID: {target_did})"
+                            )
                             print(f"Follow payload: {create_record_payload}")
 
                             follow_resp = pds_authed_req(
@@ -552,16 +563,29 @@ def execute_campaign_task(campaign_id: int) -> str:
                                     if "error" in error_data:
                                         print(f"Error type: {error_data['error']}")
                                 except Exception as e:
-                                    print(f"Could not parse error response as JSON: {e}")
-                                    print(f"Raw error response: {follow_resp.text[:500]}")
+                                    log_exception(
+                                        task_logger,
+                                        f"Error parsing follow response for {follower.account_handle}",
+                                        e,
+                                    )
+
+                                    log_exception(
+                                        task_logger,
+                                        f"Raw follow response text for {follower.account_handle}",
+                                        follow_resp.text[:500],
+                                    )
 
                                 if follow_resp.status_code == 429:
-                                    print("Rate limited - waiting before continuing...")
+                                    task_logger.warn(
+                                        f"Rate limit exceeded while trying to follow {follower.account_handle}. Retrying after delay."
+                                    )
                                     time.sleep(5)  # Wait 5 seconds for rate limiting
 
                     except Exception as e:
-                        print(
-                            f"Error processing follow for {follower.account_handle}: {e}"
+                        log_exception(
+                            task_logger,
+                            f"Error processing follow for {follower.account_handle}",
+                            e,
                         )
 
                     processed_count += 1
@@ -570,10 +594,16 @@ def execute_campaign_task(campaign_id: int) -> str:
                     time.sleep(1)
 
                     if processed_count % 100 == 0:
-                        print(f"Processed {processed_count}/{follower_count} followers")
+                        task_logger.info(
+                            f"Processed {processed_count}/{follower_count} followers for campaign '{campaign_name}'"
+                        )
 
                 except Exception as e:
-                    print(f"Error processing follower {follower.account_handle}: {e}")
+                    log_exception(
+                        task_logger,
+                        f"Error processing follower {follower.account_handle}",
+                        e,
+                    )
                     continue
 
             print(
@@ -581,7 +611,7 @@ def execute_campaign_task(campaign_id: int) -> str:
             )
 
         except Exception as e:
-            print(f"Error processing followers: {e}")
+            log_exception(task_logger, "Error processing followers for campaign", e)
             return f"Error processing followers: {e}"
         finally:
             db.close()
@@ -595,16 +625,18 @@ def execute_campaign_task(campaign_id: int) -> str:
                 db.commit()
                 print(f"Campaign '{campaign_name}' execution marked as complete")
             else:
-                print(f"Campaign with ID {campaign_id} not found for final update")
+                task_logger.info(
+                    f"Campaign with ID {campaign_id} not found for final update"
+                )
         except Exception as e:
-            print(f"Error updating final campaign status: {e}")
+            log_exception(task_logger, "Error updating final campaign status", e)
         finally:
             db.close()
 
         return f"Campaign '{campaign_name}' executed successfully. Processed {processed_count} followers."
 
     except Exception as e:
-        print(f"Unexpected error in execute_campaign_task: {e}")
+        log_exception(task_logger, "Error executing campaign task", e)
 
         # Try to mark campaign as not running in case of error
         try:

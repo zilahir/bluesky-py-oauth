@@ -21,8 +21,12 @@ function useDeleteCampaign({
     mutationKey: ["deleteCampaign", campaignId],
     mutationFn: async () => {
       const data = await deleteCampaign(campaignId);
-
       return data;
+    },
+    onSuccess: () => {
+      if (onSuccess) {
+        onSuccess();
+      }
     },
   });
 

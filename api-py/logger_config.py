@@ -15,12 +15,12 @@ class ColoredFormatter(logging.Formatter):
 
     # ANSI color codes
     COLORS = {
-        'DEBUG': '\033[36m',    # Cyan
-        'INFO': '\033[32m',     # Green
-        'WARNING': '\033[33m',  # Yellow
-        'ERROR': '\033[31m',    # Red
-        'CRITICAL': '\033[35m', # Magenta
-        'RESET': '\033[0m'      # Reset
+        "DEBUG": "\033[36m",  # Cyan
+        "INFO": "\033[32m",  # Green
+        "WARNING": "\033[33m",  # Yellow
+        "ERROR": "\033[31m",  # Red
+        "CRITICAL": "\033[35m",  # Magenta
+        "RESET": "\033[0m",  # Reset
     }
 
     def format(self, record):
@@ -32,9 +32,7 @@ class ColoredFormatter(logging.Formatter):
 
 
 def setup_logger(
-    name: str,
-    level: str = "INFO",
-    format_string: Optional[str] = None
+    name: str, level: str = "INFO", format_string: Optional[str] = None
 ) -> logging.Logger:
     """
     Set up a logger with consistent formatting.
@@ -95,6 +93,7 @@ scheduler_logger = get_logger("scheduler")
 worker_logger = get_logger("worker")
 api_logger = get_logger("api")
 task_logger = get_logger("tasks")
+oauth_logger = get_logger("oauth")
 
 
 def log_exception(logger: logging.Logger, message: str, exc: Exception):
@@ -137,3 +136,4 @@ def log_scheduler_event(job_id: str, event: str, details: str = ""):
     if details:
         message += f" - {details}"
     scheduler_logger.info(message)
+
