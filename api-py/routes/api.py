@@ -15,6 +15,7 @@ from routes.utils.postgres_connection import (
 from queue_config import get_queue
 from tasks import process_campaign_task
 from scheduler_utils import remove_campaign_jobs
+from logger_config import api_logger, log_exception
 
 
 router = APIRouter(prefix="/api", include_in_schema=False)
@@ -139,14 +140,14 @@ async def delete_campaign(
         try:
             scheduler_cleanup_success = remove_campaign_jobs(campaign_id)
             if scheduler_cleanup_success:
-                print(f"Successfully removed scheduled jobs for campaign {campaign_id}")
+                api_logger.info(f"Successfully removed scheduled jobs for campaign {campaign_id}")
             else:
-                print(
-                    f"Warning: Could not remove all scheduled jobs for campaign {campaign_id}"
+                api_logger.warning(
+                    f"Could not remove all scheduled jobs for campaign {campaign_id}"
                 )
         except Exception as e:
-            print(
-                f"Warning: Error during scheduler cleanup for campaign {campaign_id}: {e}"
+            log_exception(
+                api_logger, f"Error during scheduler cleanup for campaign {campaign_id}", e
             )
 
         # Delete all followers associated with this campaign
@@ -203,7 +204,7 @@ async def new_campaign(
         new_id = result.scalar_one()
         db.commit()
 
-        ## add the new campaign id to the body
+        # add the new campaign id to the body
         body["campaign_id"] = new_id
 
         # Enqueue the campaign processing task
@@ -235,7 +236,7 @@ def get_all_followers_of_account(
             req_url,
         )
         if profile_resp.status_code not in [200, 201]:
-            print(f"PDS HTTP Error: {profile_resp.json()}")
+            api_logger.error(f"PDS HTTP Error: {profile_resp.json()}")
         profile_resp.raise_for_status()
 
         did = profile_resp.json()["did"]
@@ -253,7 +254,7 @@ def get_all_followers_of_account(
                 req_url,
             )
             if resp.status_code not in [200, 201]:
-                print(f"PDS HTTP Error: {resp.json()}")
+                api_logger.error(f"PDS HTTP Error: {resp.json()}")
             resp.raise_for_status()
 
             followers.extend(resp.json().get("followers", []))
@@ -287,7 +288,7 @@ def get_bluesky_profile(
             req_url,
         )
         if profile_resp.status_code not in [200, 201]:
-            print(f"PDS HTTP Error: {profile_resp.json()}")
+            api_logger.error(f"PDS HTTP Error: {profile_resp.json()}")
         profile_resp.raise_for_status()
 
         did = profile_resp.json()["did"]

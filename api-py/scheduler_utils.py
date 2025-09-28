@@ -8,6 +8,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.jobstores.redis import RedisJobStore
 from queue_config import get_redis_connection
 from typing import Optional, List
+from logger_config import scheduler_logger, log_exception
 
 
 def get_scheduler_instance() -> Optional[BlockingScheduler]:
@@ -38,7 +39,7 @@ def get_scheduler_instance() -> Optional[BlockingScheduler]:
         return scheduler
 
     except Exception as e:
-        print(f"Error getting scheduler instance: {e}")
+        log_exception(scheduler_logger, "Error getting scheduler instance", e)
         return None
 
 
@@ -54,7 +55,7 @@ def remove_campaign_jobs(campaign_id: int) -> bool:
     """
     scheduler = get_scheduler_instance()
     if not scheduler:
-        print(f"Could not get scheduler instance for campaign {campaign_id}")
+        scheduler_logger.error(f"Could not get scheduler instance for campaign {campaign_id}")
         return False
 
     try:
@@ -69,7 +70,7 @@ def remove_campaign_jobs(campaign_id: int) -> bool:
                 campaign_jobs.append(job)
 
         if not campaign_jobs:
-            print(f"No scheduled jobs found for campaign {campaign_id}")
+            scheduler_logger.info(f"No scheduled jobs found for campaign {campaign_id}")
             return True
 
         # Remove each campaign-specific job
@@ -78,16 +79,16 @@ def remove_campaign_jobs(campaign_id: int) -> bool:
             try:
                 job_id = getattr(job, "id", "")
                 scheduler.remove_job(job_id)
-                print(f"Removed scheduled job: {job_id}")
+                scheduler_logger.info(f"Removed scheduled job: {job_id}")
                 removed_count += 1
             except Exception as e:
-                print(f"Error removing job {job_id}: {e}")
+                log_exception(scheduler_logger, f"Error removing job {job_id}", e)
 
-        print(f"Removed {removed_count} scheduled jobs for campaign {campaign_id}")
+        scheduler_logger.info(f"Removed {removed_count} scheduled jobs for campaign {campaign_id}")
         return True
 
     except Exception as e:
-        print(f"Error removing jobs for campaign {campaign_id}: {e}")
+        log_exception(scheduler_logger, f"Error removing jobs for campaign {campaign_id}", e)
         return False
 
     finally:
@@ -121,7 +122,7 @@ def list_campaign_jobs(campaign_id: int) -> List[str]:
         return campaign_job_ids
 
     except Exception as e:
-        print(f"Error listing jobs for campaign {campaign_id}: {e}")
+        log_exception(scheduler_logger, f"Error listing jobs for campaign {campaign_id}", e)
         return []
 
 
@@ -151,15 +152,15 @@ def cleanup_all_campaign_jobs() -> bool:
             try:
                 job_id = getattr(job, "id", "")
                 scheduler.remove_job(job_id)
-                print(f"Removed campaign job: {job_id}")
+                scheduler_logger.info(f"Removed campaign job: {job_id}")
                 removed_count += 1
             except Exception as e:
-                print(f"Error removing job {job_id}: {e}")
+                log_exception(scheduler_logger, f"Error removing job {job_id}", e)
 
-        print(f"Cleaned up {removed_count} campaign jobs")
+        scheduler_logger.info(f"Cleaned up {removed_count} campaign jobs")
         return True
 
     except Exception as e:
-        print(f"Error during campaign job cleanup: {e}")
+        log_exception(scheduler_logger, "Error during campaign job cleanup", e)
         return False
 

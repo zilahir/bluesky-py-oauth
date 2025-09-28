@@ -15,6 +15,7 @@ import sys
 from rq import Worker
 from queue_config import get_redis_connection
 from routes.utils.postgres_connection import get_db
+from logger_config import worker_logger
 
 
 def start_rq_worker():
@@ -29,8 +30,8 @@ def start_rq_worker():
     ]
 
     worker = Worker(queues, connection=redis_conn)
-    print(f"RQ Worker started. Listening for tasks on queues: {', '.join(queues)}")
-    print("Press Ctrl+C to exit")
+    worker_logger.info(f"RQ Worker started. Listening for tasks on queues: {', '.join(queues)}")
+    worker_logger.info("Press Ctrl+C to exit")
     worker.work()
 
 
@@ -43,8 +44,8 @@ def start_scheduler():
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--scheduler":
-        print("Starting Campaign Scheduler...")
+        worker_logger.info("Starting Campaign Scheduler...")
         start_scheduler()
     else:
-        print("Starting RQ Worker...")
+        worker_logger.info("Starting RQ Worker...")
         start_rq_worker()

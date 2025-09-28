@@ -7,6 +7,7 @@ import os
 
 # Import metrics tracking functions
 from metrics import track_rq_job, track_followers_processed
+from logger_config import task_logger, log_exception, log_campaign_event
 
 os.environ["no_proxy"] = "*"
 
