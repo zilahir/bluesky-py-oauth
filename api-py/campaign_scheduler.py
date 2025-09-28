@@ -11,6 +11,13 @@ from apscheduler.jobstores.redis import RedisJobStore
 from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.triggers.cron import CronTrigger
 
+# Check APScheduler version for compatibility
+try:
+    import apscheduler
+    print(f"Using APScheduler version: {apscheduler.__version__}")
+except:
+    print("Could not detect APScheduler version")
+
 from queue_config import get_redis_connection
 from campaign_config import CampaignConfig
 from daily_campaign_worker import process_daily_campaigns
@@ -66,6 +73,8 @@ class CampaignScheduler:
     def start_scheduler(self):
         """Start the campaign scheduler"""
         try:
+            print("Setting up scheduled jobs...")
+
             # Add daily campaign processing job
             self.scheduler.add_job(
                 func=self._execute_daily_campaigns,
@@ -77,6 +86,7 @@ class CampaignScheduler:
                 name='Daily Campaign Processor',
                 replace_existing=True
             )
+            print("✓ Daily campaign processor job added")
 
             # Add a test job that runs every 5 minutes for testing
             # Remove this in production
@@ -87,11 +97,17 @@ class CampaignScheduler:
                 name='Test Campaign Job',
                 replace_existing=True
             )
+            print("✓ Test job added (every 5 minutes)")
 
             print(f"Campaign scheduler started. Daily execution at {self.config.DAILY_EXECUTION_HOUR:02d}:{self.config.DAILY_EXECUTION_MINUTE:02d} UTC")
             print("Scheduled jobs:")
             for job in self.scheduler.get_jobs():
-                print(f"  - {job.name} (ID: {job.id}) - Next run: {job.next_run_time}")
+                try:
+                    # Handle different APScheduler versions
+                    next_run = getattr(job, 'next_run_time', 'N/A')
+                    print(f"  - {job.name} (ID: {job.id}) - Next run: {next_run}")
+                except AttributeError:
+                    print(f"  - {job.name} (ID: {job.id}) - Next run: N/A")
 
             # Register shutdown handler
             atexit.register(self.shutdown_scheduler)
@@ -169,10 +185,16 @@ class CampaignScheduler:
         jobs = self.scheduler.get_jobs()
         print(f"Scheduled jobs ({len(jobs)}):")
         for job in jobs:
-            print(f"  - {job.name} (ID: {job.id})")
-            print(f"    Next run: {job.next_run_time}")
-            print(f"    Trigger: {job.trigger}")
-            print()
+            try:
+                next_run = getattr(job, 'next_run_time', 'N/A')
+                trigger = getattr(job, 'trigger', 'N/A')
+                print(f"  - {job.name} (ID: {job.id})")
+                print(f"    Next run: {next_run}")
+                print(f"    Trigger: {trigger}")
+                print()
+            except AttributeError as e:
+                print(f"  - {job.name} (ID: {job.id}) - Error accessing job details: {e}")
+                print()
 
     def remove_job(self, job_id: str):
         """Remove a scheduled job"""
