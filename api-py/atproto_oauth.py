@@ -385,9 +385,13 @@ def pds_authed_req(
 
         # If we got a new server-provided DPoP nonce, store it in database and retry.
         if resp.status_code in [400, 401]:
+            oauth_logger.error(
+                f"PDS HTTP Error {resp.status_code} for {method} {url}: {resp.text}, body={body}"
+            )
             try:
                 error_data = resp.json()
                 if error_data.get("error") == "use_dpop_nonce":
+                    oauth_logger.info(f"DPoP nonce error: {error_data}")
                     dpop_pds_nonce = resp.headers["DPoP-Nonce"]
                     oauth_logger.info(
                         f"Retrying PDS request with new DPoP nonce: {dpop_pds_nonce}"

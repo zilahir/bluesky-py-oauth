@@ -6,6 +6,7 @@ This worker handles the daily execution of active campaigns:
 - Checks for follow-backs
 - Unfollows accounts that haven't followed back after the delay period
 """
+
 import time
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
@@ -17,7 +18,7 @@ from routes.utils.postgres_connection import (
     Campaign,
     FollowersToGet,
     OAuthSession,
-    CampaignExecutionLog
+    CampaignExecutionLog,
 )
 from campaign_config import CampaignConfig, CampaignMetrics, CAMPAIGN_EXECUTION_STATES
 from atproto_oauth import pds_authed_req
@@ -47,34 +48,49 @@ class DailyCampaignWorker:
             campaign_logger.info(f"Starting daily campaign processing at {start_time}")
 
             if self.config.DEBUG_MODE:
-                campaign_logger.info("🐛 DEBUG MODE: Running every minute with verbose logging")
+                campaign_logger.info(
+                    "🐛 DEBUG MODE: Running every minute with verbose logging"
+                )
 
             # Get all active campaigns (setup complete but not deleted)
             db = next(get_db())
             try:
-                active_campaigns = db.query(Campaign).filter(
-                    and_(
-                        Campaign.is_setup_job_running == False,  # Setup must be complete
-                        Campaign.deleted_at.is_(None)  # Not deleted
+                active_campaigns = (
+                    db.query(Campaign)
+                    .filter(
+                        and_(
+                            Campaign.is_setup_job_running
+                            == False,  # Setup must be complete
+                            Campaign.deleted_at.is_(None),  # Not deleted
+                        )
                     )
-                ).all()
+                    .all()
+                )
 
-                campaign_logger.info(f"Found {len(active_campaigns)} active campaigns to process")
+                campaign_logger.info(
+                    f"Found {len(active_campaigns)} active campaigns to process"
+                )
 
                 if self.config.DEBUG_MODE:
                     for campaign in active_campaigns:
-                        campaign_logger.debug(f"🐛 Campaign {campaign.id}: '{campaign.name}' (User: {campaign.user_did})")
+                        campaign_logger.debug(
+                            f"🐛 Campaign {campaign.id}: '{campaign.name}' (User: {campaign.user_did})"
+                        )
 
                 for campaign in active_campaigns:
                     try:
                         result = self.process_single_campaign(campaign.id, db)
                         if result:
                             total_campaigns_processed += 1
-                            total_follows += result.get('follows_count', 0)
-                            total_unfollows += result.get('unfollows_count', 0)
-                            total_follow_backs += result.get('follow_backs_count', 0)
+                            total_follows += result.get("follows_count", 0)
+                            total_unfollows += result.get("unfollows_count", 0)
+                            total_follow_backs += result.get("follow_backs_count", 0)
                     except Exception as e:
-                        log_exception(campaign_logger, f"Error processing campaign {campaign.id}", e)
+                        log_exception(
+                            campaign_logger,
+                            f"Error processing campaign {campaign.id}",
+                            e,
+                        )
                         continue
 
             finally:
@@ -115,12 +131,16 @@ class DailyCampaignWorker:
                 return {}
 
             # Get OAuth session for the campaign user
-            oauth_session = db.query(OAuthSession).filter(
-                OAuthSession.did == campaign.user_did
-            ).first()
+            oauth_session = (
+                db.query(OAuthSession)
+                .filter(OAuthSession.did == campaign.user_did)
+                .first()
+            )
 
             if not oauth_session:
-                campaign_logger.warning(f"No OAuth session found for campaign {campaign_id}")
+                campaign_logger.warning(
+                    f"No OAuth session found for campaign {campaign_id}"
+                )
                 return {}
 
             # Check for follow-backs first
@@ -133,7 +153,9 @@ class DailyCampaignWorker:
             unfollows_count = self.process_unfollows(campaign_id, oauth_session, db)
 
             # Log execution
-            execution_duration = int((datetime.utcnow() - campaign_start_time).total_seconds())
+            execution_duration = int(
+                (datetime.utcnow() - campaign_start_time).total_seconds()
+            )
 
             self.log_campaign_execution(
                 campaign_id=campaign_id,
@@ -141,7 +163,7 @@ class DailyCampaignWorker:
                 unfollows_count=unfollows_count,
                 follow_backs_count=follow_backs_count,
                 execution_duration_seconds=execution_duration,
-                db=db
+                db=db,
             )
 
             # Track metrics
@@ -150,13 +172,15 @@ class DailyCampaignWorker:
             )
 
             return {
-                'follows_count': follows_count,
-                'unfollows_count': unfollows_count,
-                'follow_backs_count': follow_backs_count
+                "follows_count": follows_count,
+                "unfollows_count": unfollows_count,
+                "follow_backs_count": follow_backs_count,
             }
 
         except Exception as e:
-            log_exception(campaign_logger, f"Error processing campaign {campaign_id}", e)
+            log_exception(
+                campaign_logger, f"Error processing campaign {campaign_id}", e
+            )
             # Log failed execution
             self.log_campaign_execution(
                 campaign_id=campaign_id,
@@ -166,7 +190,7 @@ class DailyCampaignWorker:
                 errors_count=1,
                 status="failed",
                 error_message=str(e),
-                db=db
+                db=db,
             )
             return {}
 
@@ -175,14 +199,19 @@ class DailyCampaignWorker:
         log_campaign_event(campaign_id, "Checking follow-backs")
 
         # Get accounts we're following but haven't confirmed follow-back yet
-        accounts_to_check = db.query(FollowersToGet).filter(
-            and_(
-                FollowersToGet.campaign_id == campaign_id,
-                FollowersToGet.me_following.isnot(None),
-                FollowersToGet.is_following_me.is_(None),
-                FollowersToGet.unfollowed_at.is_(None)
+        accounts_to_check = (
+            db.query(FollowersToGet)
+            .filter(
+                and_(
+                    FollowersToGet.campaign_id == campaign_id,
+                    FollowersToGet.me_following.isnot(None),
+                    FollowersToGet.is_following_me.is_(None),
+                    FollowersToGet.unfollowed_at.is_(None),
+                )
             )
-        ).limit(20).all()  # Limit to prevent API overload
+            .limit(20)
+            .all()
+        )  # Limit to prevent API overload
 
         follow_backs_detected = 0
 
@@ -197,7 +226,9 @@ class DailyCampaignWorker:
                     account.is_following_me = datetime.utcnow()
                     account.status = CAMPAIGN_EXECUTION_STATES["FOLLOWING_BACK"]
                     follow_backs_detected += 1
-                    campaign_logger.info(f"✓ {account.account_handle} is following back!")
+                    campaign_logger.info(
+                        f"✓ {account.account_handle} is following back!"
+                    )
 
                 account.last_checked_at = datetime.utcnow()
 
@@ -205,12 +236,18 @@ class DailyCampaignWorker:
                 time.sleep(self.config.REQUEST_DELAY_SECONDS)
 
             except Exception as e:
-                log_exception(campaign_logger, f"Error checking follow-back for {account.account_handle}", e)
+                log_exception(
+                    campaign_logger,
+                    f"Error checking follow-back for {account.account_handle}",
+                    e,
+                )
                 continue
 
         if accounts_to_check:
             db.commit()
-            log_campaign_event(campaign_id, f"Detected {follow_backs_detected} new follow-backs")
+            log_campaign_event(
+                campaign_id, f"Detected {follow_backs_detected} new follow-backs"
+            )
 
         return follow_backs_detected
 
@@ -220,13 +257,17 @@ class DailyCampaignWorker:
 
         # Check today's follow count
         today = datetime.utcnow().date()
-        today_follows = db.query(FollowersToGet).filter(
-            and_(
-                FollowersToGet.campaign_id == campaign_id,
-                FollowersToGet.me_following.isnot(None),
-                func.date(FollowersToGet.me_following) == today
+        today_follows = (
+            db.query(FollowersToGet)
+            .filter(
+                and_(
+                    FollowersToGet.campaign_id == campaign_id,
+                    FollowersToGet.me_following.isnot(None),
+                    func.date(FollowersToGet.me_following) == today,
+                )
             )
-        ).count()
+            .count()
+        )
 
         remaining_follows = max(0, self.config.MAX_FOLLOWS_PER_DAY - today_follows)
 
@@ -235,14 +276,20 @@ class DailyCampaignWorker:
             return 0
 
         # Get accounts ready to follow
-        accounts_to_follow = db.query(FollowersToGet).filter(
-            and_(
-                FollowersToGet.campaign_id == campaign_id,
-                FollowersToGet.me_following.is_(None),
-                FollowersToGet.unfollowed_at.is_(None),
-                FollowersToGet.follow_attempt_count < self.config.MAX_FOLLOW_ATTEMPTS
+        accounts_to_follow = (
+            db.query(FollowersToGet)
+            .filter(
+                and_(
+                    FollowersToGet.campaign_id == campaign_id,
+                    FollowersToGet.me_following.is_(None),
+                    FollowersToGet.unfollowed_at.is_(None),
+                    FollowersToGet.follow_attempt_count
+                    < self.config.MAX_FOLLOW_ATTEMPTS,
+                )
             )
-        ).limit(remaining_follows).all()
+            .limit(remaining_follows)
+            .all()
+        )
 
         follows_count = 0
 
@@ -260,13 +307,17 @@ class DailyCampaignWorker:
                 time.sleep(self.config.REQUEST_DELAY_SECONDS)
 
             except Exception as e:
-                log_exception(campaign_logger, f"Error following {account.account_handle}", e)
+                log_exception(
+                    campaign_logger, f"Error following {account.account_handle}", e
+                )
                 account.follow_attempt_count += 1
                 continue
 
         if accounts_to_follow:
             db.commit()
-            log_campaign_event(campaign_id, f"Successfully followed {follows_count} accounts")
+            log_campaign_event(
+                campaign_id, f"Successfully followed {follows_count} accounts"
+            )
 
         return follows_count
 
@@ -277,16 +328,22 @@ class DailyCampaignWorker:
         cutoff_date = self.config.get_unfollow_cutoff_date()
 
         # Get accounts to unfollow
-        accounts_to_unfollow = db.query(FollowersToGet).filter(
-            and_(
-                FollowersToGet.campaign_id == campaign_id,
-                FollowersToGet.me_following.isnot(None),
-                FollowersToGet.me_following < cutoff_date,
-                FollowersToGet.is_following_me.is_(None),
-                FollowersToGet.unfollowed_at.is_(None),
-                FollowersToGet.unfollow_attempt_count < self.config.MAX_UNFOLLOW_ATTEMPTS
+        accounts_to_unfollow = (
+            db.query(FollowersToGet)
+            .filter(
+                and_(
+                    FollowersToGet.campaign_id == campaign_id,
+                    FollowersToGet.me_following.isnot(None),
+                    FollowersToGet.me_following < cutoff_date,
+                    FollowersToGet.is_following_me.is_(None),
+                    FollowersToGet.unfollowed_at.is_(None),
+                    FollowersToGet.unfollow_attempt_count
+                    < self.config.MAX_UNFOLLOW_ATTEMPTS,
+                )
             )
-        ).limit(self.config.MAX_UNFOLLOWS_PER_DAY).all()
+            .limit(self.config.MAX_UNFOLLOWS_PER_DAY)
+            .all()
+        )
 
         unfollows_count = 0
 
@@ -304,17 +361,23 @@ class DailyCampaignWorker:
                 time.sleep(self.config.REQUEST_DELAY_SECONDS)
 
             except Exception as e:
-                log_exception(campaign_logger, f"Error unfollowing {account.account_handle}", e)
+                log_exception(
+                    campaign_logger, f"Error unfollowing {account.account_handle}", e
+                )
                 account.unfollow_attempt_count += 1
                 continue
 
         if accounts_to_unfollow:
             db.commit()
-            log_campaign_event(campaign_id, f"Successfully unfollowed {unfollows_count} accounts")
+            log_campaign_event(
+                campaign_id, f"Successfully unfollowed {unfollows_count} accounts"
+            )
 
         return unfollows_count
 
-    def follow_account(self, follower_record: FollowersToGet, oauth_session, db: Session) -> bool:
+    def follow_account(
+        self, follower_record: FollowersToGet, oauth_session, db: Session
+    ) -> bool:
         """Follow a specific account"""
         try:
             # Get the target account's DID
@@ -322,12 +385,16 @@ class DailyCampaignWorker:
             profile_resp = req("GET", profile_url, timeout=30)
 
             if profile_resp.status_code not in [200, 201]:
-                campaign_logger.warning(f"Failed to get profile for {follower_record.account_handle}")
+                campaign_logger.warning(
+                    f"Failed to get profile for {follower_record.account_handle}"
+                )
                 return False
 
             target_did = profile_resp.json().get("did")
             if not target_did:
-                campaign_logger.warning(f"No DID found for {follower_record.account_handle}")
+                campaign_logger.warning(
+                    f"No DID found for {follower_record.account_handle}"
+                )
                 return False
 
             # Create follow record
@@ -337,7 +404,9 @@ class DailyCampaignWorker:
                 "createdAt": datetime.utcnow().isoformat() + "Z",
             }
 
-            create_record_url = f"{oauth_session.pds_url}/xrpc/com.atproto.repo.createRecord"
+            create_record_url = (
+                f"{oauth_session.pds_url}/xrpc/com.atproto.repo.createRecord"
+            )
             create_record_payload = {
                 "repo": oauth_session.did,
                 "collection": "app.bsky.graph.follow",
@@ -356,40 +425,58 @@ class DailyCampaignWorker:
             )
 
             if follow_resp.status_code in [200, 201]:
-                campaign_logger.info(f"✓ Successfully followed {follower_record.account_handle}")
+                campaign_logger.info(
+                    f"✓ Successfully followed {follower_record.account_handle}"
+                )
                 return True
             else:
-                campaign_logger.warning(f"✗ Failed to follow {follower_record.account_handle}: HTTP {follow_resp.status_code}")
+                campaign_logger.warning(
+                    f"✗ Failed to follow {follower_record.account_handle}: HTTP {follow_resp.status_code}"
+                )
                 return False
 
         except Exception as e:
-            log_exception(campaign_logger, f"Error in follow_account for {follower_record.account_handle}", e)
+            log_exception(
+                campaign_logger,
+                f"Error in follow_account for {follower_record.account_handle}",
+                e,
+            )
             return False
 
-    def unfollow_account(self, follower_record: FollowersToGet, oauth_session, db: Session) -> bool:
+    def unfollow_account(
+        self, follower_record: FollowersToGet, oauth_session, db: Session
+    ) -> bool:
         """Unfollow a specific account by deleting the follow record"""
         try:
-            campaign_logger.info(f"Attempting to unfollow {follower_record.account_handle}")
+            campaign_logger.info(
+                f"Attempting to unfollow {follower_record.account_handle}"
+            )
 
             # Step 1: Get the target account's DID
             profile_url = f"https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor={follower_record.account_handle}"
             profile_resp = req("GET", profile_url, timeout=30)
 
             if profile_resp.status_code not in [200, 201]:
-                campaign_logger.warning(f"Failed to get profile for {follower_record.account_handle}")
+                campaign_logger.warning(
+                    f"Failed to get profile for {follower_record.account_handle}"
+                )
                 return False
 
             target_did = profile_resp.json().get("did")
             if not target_did:
-                campaign_logger.warning(f"No DID found for {follower_record.account_handle}")
+                campaign_logger.warning(
+                    f"No DID found for {follower_record.account_handle}"
+                )
                 return False
 
             # Step 2: Find our follow records to locate the specific one for this account
-            list_records_url = f"{oauth_session.pds_url}/xrpc/com.atproto.repo.listRecords"
+            list_records_url = (
+                f"{oauth_session.pds_url}/xrpc/com.atproto.repo.listRecords"
+            )
             list_records_params = {
                 "repo": oauth_session.did,
                 "collection": "app.bsky.graph.follow",
-                "limit": 100  # Get recent follows
+                "limit": 100,  # Get recent follows
             }
 
             list_resp = pds_authed_req(
@@ -400,11 +487,13 @@ class DailyCampaignWorker:
                 user_did=oauth_session.did,
                 db=db,
                 dpop_pds_nonce=getattr(oauth_session, "dpop_pds_nonce", "") or "",
-                params=list_records_params,
+                body=list_records_params,
             )
 
             if list_resp.status_code not in [200, 201]:
-                campaign_logger.error(f"Failed to list follow records: HTTP {list_resp.status_code}")
+                campaign_logger.error(
+                    f"Failed to list follow records: HTTP {list_resp.status_code}"
+                )
                 return False
 
             # Step 3: Find the specific follow record for this account
@@ -417,13 +506,17 @@ class DailyCampaignWorker:
                     break
 
             if not follow_record_uri:
-                campaign_logger.warning(f"No follow record found for {follower_record.account_handle} ({target_did})")
+                campaign_logger.warning(
+                    f"No follow record found for {follower_record.account_handle} ({target_did})"
+                )
                 # This might happen if we already unfollowed or there was an error
                 # Consider this a success since the goal (not following) is achieved
                 return True
 
             # Step 4: Delete the follow record to unfollow
-            delete_record_url = f"{oauth_session.pds_url}/xrpc/com.atproto.repo.deleteRecord"
+            delete_record_url = (
+                f"{oauth_session.pds_url}/xrpc/com.atproto.repo.deleteRecord"
+            )
 
             # Extract rkey from URI (format: at://did:plc:xxx/app.bsky.graph.follow/rkey)
             rkey = follow_record_uri.split("/")[-1]
@@ -431,7 +524,7 @@ class DailyCampaignWorker:
             delete_record_payload = {
                 "repo": oauth_session.did,
                 "collection": "app.bsky.graph.follow",
-                "rkey": rkey
+                "rkey": rkey,
             }
 
             campaign_logger.debug(f"Deleting follow record: {follow_record_uri}")
@@ -448,10 +541,14 @@ class DailyCampaignWorker:
             )
 
             if delete_resp.status_code in [200, 201]:
-                campaign_logger.info(f"✓ Successfully unfollowed {follower_record.account_handle}")
+                campaign_logger.info(
+                    f"✓ Successfully unfollowed {follower_record.account_handle}"
+                )
                 return True
             else:
-                campaign_logger.warning(f"✗ Failed to unfollow {follower_record.account_handle}: HTTP {delete_resp.status_code}")
+                campaign_logger.warning(
+                    f"✗ Failed to unfollow {follower_record.account_handle}: HTTP {delete_resp.status_code}"
+                )
                 try:
                     error_data = delete_resp.json()
                     campaign_logger.error(f"Error details: {error_data}")
@@ -460,10 +557,16 @@ class DailyCampaignWorker:
                 return False
 
         except Exception as e:
-            log_exception(campaign_logger, f"Error in unfollow_account for {follower_record.account_handle}", e)
+            log_exception(
+                campaign_logger,
+                f"Error in unfollow_account for {follower_record.account_handle}",
+                e,
+            )
             return False
 
-    def check_if_following_back(self, account_handle: str, oauth_session, db: Session) -> bool:
+    def check_if_following_back(
+        self, account_handle: str, oauth_session, db: Session
+    ) -> bool:
         """Check if an account is following us back"""
         try:
             campaign_logger.debug(f"Checking if {account_handle} is following back")
@@ -482,17 +585,23 @@ class DailyCampaignWorker:
                 return False
 
             # Step 2: Check their follow records to see if they follow us
-            list_records_url = f"{oauth_session.pds_url}/xrpc/com.atproto.repo.listRecords"
+            list_records_url = (
+                f"{oauth_session.pds_url}/xrpc/com.atproto.repo.listRecords"
+            )
             list_records_params = {
                 "repo": target_did,
                 "collection": "app.bsky.graph.follow",
-                "limit": 100  # Get recent follows
+                "limit": 100,  # Get recent follows
             }
 
             # Use public API endpoint for listing records (no auth needed for public records)
-            public_list_url = f"https://public.api.bsky.app/xrpc/com.atproto.repo.listRecords"
+            public_list_url = (
+                f"https://public.api.bsky.app/xrpc/com.atproto.repo.listRecords"
+            )
 
-            list_resp = req("GET", public_list_url, params=list_records_params, timeout=30)
+            list_resp = req(
+                "GET", public_list_url, params=list_records_params, timeout=30
+            )
 
             if list_resp.status_code not in [200, 201]:
                 # If public API fails, try authenticated request
@@ -504,11 +613,13 @@ class DailyCampaignWorker:
                     user_did=oauth_session.did,
                     db=db,
                     dpop_pds_nonce=getattr(oauth_session, "dpop_pds_nonce", "") or "",
-                    params=list_records_params,
+                    body=list_records_params,
                 )
 
             if list_resp.status_code not in [200, 201]:
-                campaign_logger.error(f"Failed to list {account_handle}'s follow records: HTTP {list_resp.status_code}")
+                campaign_logger.error(
+                    f"Failed to list {account_handle}'s follow records: HTTP {list_resp.status_code}"
+                )
                 return False
 
             # Step 3: Search for our DID in their follow records
@@ -523,14 +634,23 @@ class DailyCampaignWorker:
             return False
 
         except Exception as e:
-            log_exception(campaign_logger, f"Error checking follow-back for {account_handle}", e)
+            log_exception(
+                campaign_logger, f"Error checking follow-back for {account_handle}", e
+            )
             return False
 
-    def log_campaign_execution(self, campaign_id: int, follows_count: int = 0,
-                             unfollows_count: int = 0, follow_backs_count: int = 0,
-                             errors_count: int = 0, execution_duration_seconds: int = 0,
-                             status: str = "success", error_message: str = None,
-                             db: Session = None):
+    def log_campaign_execution(
+        self,
+        campaign_id: int,
+        follows_count: int = 0,
+        unfollows_count: int = 0,
+        follow_backs_count: int = 0,
+        errors_count: int = 0,
+        execution_duration_seconds: int = 0,
+        status: str = "success",
+        error_message: str = None,
+        db: Session = None,
+    ):
         """Log campaign execution results"""
         if not db:
             db = next(get_db())
@@ -548,7 +668,7 @@ class DailyCampaignWorker:
                 errors_count=errors_count,
                 execution_duration_seconds=execution_duration_seconds,
                 status=status,
-                error_message=error_message
+                error_message=error_message,
             )
 
             db.add(log_entry)
@@ -568,3 +688,4 @@ def process_daily_campaigns() -> str:
     """Main entry point for daily campaign processing worker"""
     worker = DailyCampaignWorker()
     return worker.process_all_active_campaigns()
+
