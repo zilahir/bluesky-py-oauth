@@ -12,6 +12,11 @@ from apscheduler.jobstores.redis import RedisJobStore
 from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.triggers.cron import CronTrigger
 
+from queue_config import get_redis_connection
+from campaign_config import CampaignConfig
+from daily_campaign_worker import process_daily_campaigns
+from logger_config import scheduler_logger, log_exception, log_scheduler_event
+
 # Check APScheduler version for compatibility
 try:
     import apscheduler
@@ -19,11 +24,6 @@ try:
     scheduler_logger.info(f"Using APScheduler version: {apscheduler.__version__}")
 except Exception as e:
     scheduler_logger.warning(f"Could not detect APScheduler version: {e}")
-
-from queue_config import get_redis_connection
-from campaign_config import CampaignConfig
-from daily_campaign_worker import process_daily_campaigns
-from logger_config import scheduler_logger, log_exception, log_scheduler_event
 
 
 def execute_daily_campaigns():
@@ -127,18 +127,15 @@ class CampaignScheduler:
         try:
             scheduler_logger.info("Setting up scheduled jobs...")
 
-            # Add daily campaign processing job
+            # Add campaign processing job - DEBUG MODE: Every minute
             self.scheduler.add_job(
                 func=execute_daily_campaigns,
-                trigger=CronTrigger(
-                    hour=self.config.DAILY_EXECUTION_HOUR,
-                    minute=self.config.DAILY_EXECUTION_MINUTE,
-                ),
+                trigger=CronTrigger(minute=f"*/{self.config.DEBUG_EXECUTION_INTERVAL_MINUTES}"),
                 id="daily_campaign_processor",
-                name="Daily Campaign Processor",
+                name="Campaign Processor (Debug Mode - Every Minute)",
                 replace_existing=True,
             )
-            scheduler_logger.info("✓ Daily campaign processor job added")
+            scheduler_logger.info("✓ Campaign processor job added (DEBUG: every minute)")
 
             # Add a test job that runs every 1 minutes for testing
             # Remove this in production
@@ -152,7 +149,7 @@ class CampaignScheduler:
             scheduler_logger.info("✓ Test job added (every 1 minute)")
 
             scheduler_logger.info(
-                f"Campaign scheduler started. Daily execution at {self.config.DAILY_EXECUTION_HOUR:02d}:{self.config.DAILY_EXECUTION_MINUTE:02d} UTC"
+                f"Campaign scheduler started in DEBUG MODE. Execution every {self.config.DEBUG_EXECUTION_INTERVAL_MINUTES} minute(s)"
             )
             scheduler_logger.info("Scheduled jobs:")
             for job in self.scheduler.get_jobs():

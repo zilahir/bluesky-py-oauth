@@ -22,15 +22,15 @@ def start_rq_worker():
     """Start the RQ worker for processing campaign tasks"""
     redis_conn = get_redis_connection()
 
-    # Add the new daily campaign execution queue
+    # RQ worker only handles setup tasks now - execution is handled by scheduler
     queues = [
         "campaign_get_all_followers",
-        "campaign_execute",
-        "campaign_daily_execution",
     ]
 
     worker = Worker(queues, connection=redis_conn)
-    worker_logger.info(f"RQ Worker started. Listening for tasks on queues: {', '.join(queues)}")
+    worker_logger.info(
+        f"RQ Worker started. Listening for tasks on queues: {', '.join(queues)}"
+    )
     worker_logger.info("Press Ctrl+C to exit")
     worker.work()
 

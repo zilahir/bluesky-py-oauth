@@ -88,12 +88,13 @@ def get_logger(name: str, level: str = "INFO") -> logging.Logger:
 
 
 # Application-wide logger instances for common modules
-campaign_logger = get_logger("campaign")
-scheduler_logger = get_logger("scheduler")
-worker_logger = get_logger("worker")
-api_logger = get_logger("api")
-task_logger = get_logger("tasks")
-oauth_logger = get_logger("oauth")
+# Use DEBUG level for development
+campaign_logger = get_logger("campaign", "DEBUG")
+scheduler_logger = get_logger("scheduler", "DEBUG")
+worker_logger = get_logger("worker", "DEBUG")
+api_logger = get_logger("api", "INFO")
+task_logger = get_logger("tasks", "INFO")
+oauth_logger = get_logger("oauth", "INFO")
 
 
 def log_exception(logger: logging.Logger, message: str, exc: Exception):
@@ -136,4 +137,3 @@ def log_scheduler_event(job_id: str, event: str, details: str = ""):
     if details:
         message += f" - {details}"
     scheduler_logger.info(message)
-

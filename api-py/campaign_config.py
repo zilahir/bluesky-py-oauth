@@ -33,9 +33,11 @@ class CampaignConfig:
     FOLLOW_BATCH_SIZE = 5  # Process follows in batches
     UNFOLLOW_BATCH_SIZE = 10  # Process unfollows in batches
 
-    # Campaign execution timing
-    DAILY_EXECUTION_HOUR = 10  # Execute campaigns at 10 AM
-    DAILY_EXECUTION_MINUTE = 0
+    # Campaign execution timing - DEBUG MODE: Every minute
+    DAILY_EXECUTION_HOUR = None  # Not used in debug mode
+    DAILY_EXECUTION_MINUTE = None  # Not used in debug mode
+    DEBUG_EXECUTION_INTERVAL_MINUTES = 1  # Execute every minute for debugging
+    DEBUG_MODE = True  # Enable verbose logging and frequent execution
 
     @classmethod
     def get_unfollow_cutoff_date(cls):

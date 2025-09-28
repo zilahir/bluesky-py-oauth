@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, func
 
 from routes.utils.postgres_connection import (
     get_db,
@@ -46,18 +46,24 @@ class DailyCampaignWorker:
         try:
             campaign_logger.info(f"Starting daily campaign processing at {start_time}")
 
-            # Get all active campaigns
+            if self.config.DEBUG_MODE:
+                campaign_logger.info("🐛 DEBUG MODE: Running every minute with verbose logging")
+
+            # Get all active campaigns (setup complete but not deleted)
             db = next(get_db())
             try:
                 active_campaigns = db.query(Campaign).filter(
                     and_(
-                        Campaign.is_campaign_running == True,
-                        Campaign.is_setup_job_running == False,
-                        Campaign.deleted_at.is_(None)
+                        Campaign.is_setup_job_running == False,  # Setup must be complete
+                        Campaign.deleted_at.is_(None)  # Not deleted
                     )
                 ).all()
 
                 campaign_logger.info(f"Found {len(active_campaigns)} active campaigns to process")
+
+                if self.config.DEBUG_MODE:
+                    for campaign in active_campaigns:
+                        campaign_logger.debug(f"🐛 Campaign {campaign.id}: '{campaign.name}' (User: {campaign.user_did})")
 
                 for campaign in active_campaigns:
                     try:
@@ -218,7 +224,7 @@ class DailyCampaignWorker:
             and_(
                 FollowersToGet.campaign_id == campaign_id,
                 FollowersToGet.me_following.isnot(None),
-                db.func.date(FollowersToGet.me_following) == today
+                func.date(FollowersToGet.me_following) == today
             )
         ).count()
 
