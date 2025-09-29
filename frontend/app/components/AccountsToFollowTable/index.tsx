@@ -20,7 +20,7 @@ import {
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { useState } from "react";
-import { ArrowUpDownIcon } from "lucide-react";
+import { ArrowUpDownIcon, CheckIcon } from "lucide-react";
 
 type AccountToFollow = CampaignFollowers;
 
@@ -49,6 +49,7 @@ const columns: ColumnDef<AccountToFollow>[] = [
     cell: ({ row }) =>
       row.getValue("me_following") ? (
         <Badge variant="success">
+          <CheckIcon />
           {format(new Date(row.getValue("me_following")), "dd MMM yyyy")}
         </Badge>
       ) : (
@@ -71,6 +72,7 @@ const columns: ColumnDef<AccountToFollow>[] = [
     cell: ({ row }) =>
       row.getValue("is_following_me") ? (
         <Badge variant="success">
+          <CheckIcon />
           {format(new Date(row.getValue("is_following_me")), "dd MMM yyyy")}
         </Badge>
       ) : (

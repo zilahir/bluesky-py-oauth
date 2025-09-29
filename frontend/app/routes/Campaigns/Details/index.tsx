@@ -135,39 +135,51 @@ function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
                 <div className="grid grid-cols-3 gap-3">
                   <Card>
                     <CardHeader>
-                      <CardTitle>Total accounts to get</CardTitle>
-                      <CardDescription>
+                      <CardDescription>Total accounts to get</CardDescription>
+
+                      <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
                         {isCampaignStatsLoading ? (
                           <Loader2 className="animate-spin h-4 w-4 text-gray-500" />
                         ) : (
                           campaignStat?.stats.total_targets || 0
                         )}
-                      </CardDescription>
+                      </CardTitle>
                     </CardHeader>
+                    <CardFooter className="text-xs text-muted-foreground">
+                      The total number of followers you want to gain in this
+                      campaign.
+                    </CardFooter>
                   </Card>
                   <Card>
                     <CardHeader>
-                      <CardTitle>Followers gained</CardTitle>
-                      <CardDescription>
+                      <CardDescription>Followers gained</CardDescription>
+                      <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
                         {isCampaignStatsLoading ? (
                           <Loader2 className="animate-spin h-4 w-4 text-gray-500" />
                         ) : (
                           campaignStat?.stats.total_followers_gained || 0
                         )}
-                      </CardDescription>
+                      </CardTitle>
                     </CardHeader>
+                    <CardFooter className="text-xs text-muted-foreground">
+                      The number of followers gained in this campaign.
+                    </CardFooter>
                   </Card>
                   <Card>
                     <CardHeader>
-                      <CardTitle>Unfollowed</CardTitle>
-                      <CardDescription>
+                      <CardDescription>Unfollowed</CardDescription>
+
+                      <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
                         {isCampaignStatsLoading ? (
                           <Loader2 className="animate-spin h-4 w-4 text-gray-500" />
                         ) : (
                           campaignStat?.stats.total_unfollowed_accounts || 0
                         )}
-                      </CardDescription>
+                      </CardTitle>
                     </CardHeader>
+                    <CardFooter className="text-xs text-muted-foreground">
+                      The number of accounts unfollowed in this campaign.
+                    </CardFooter>
                   </Card>
                 </div>
               </CardContent>
