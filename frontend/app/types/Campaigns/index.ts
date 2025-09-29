@@ -17,8 +17,8 @@ export interface Campaign {
 export interface CampaignFollowers {
   id: string;
   account_handle: string;
-  me_following: boolean;
-  is_following_me: boolean;
+  me_following: string;
+  is_following_me: string;
   created_at: string;
   updated_at: string;
 }

@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
 import ConfirmDeleteCampaignDialog from "~/components/ConfirmDeletCampaignDialog";
+import useCampaignStats from "~/hooks/useCampaignStats";
 
 function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
   const { id } = params;
@@ -31,6 +32,11 @@ function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
     id,
   });
 
+  const { data: campaignStat, isLoading: isCampaignStatsLoading } =
+    useCampaignStats({
+      campaignId: id,
+    });
+
   if (isLoading) {
     return (
       <div>
@@ -39,7 +45,8 @@ function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
     );
   }
 
-  console.log("CampaignDetailsPage data:", data);
+  console.log("Campaign Stats", campaignStat);
+
   return (
     <>
       <div>
@@ -108,7 +115,11 @@ function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
                     <CardHeader>
                       <CardTitle>Total accounts to get</CardTitle>
                       <CardDescription>
-                        {data?.followers.length}
+                        {isCampaignStatsLoading ? (
+                          <Loader2 className="animate-spin h-4 w-4 text-gray-500" />
+                        ) : (
+                          campaignStat?.stats.total_targets || 0
+                        )}
                       </CardDescription>
                     </CardHeader>
                   </Card>
@@ -116,7 +127,11 @@ function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
                     <CardHeader>
                       <CardTitle>Followers gained</CardTitle>
                       <CardDescription>
-                        {data?.followers.length}
+                        {isCampaignStatsLoading ? (
+                          <Loader2 className="animate-spin h-4 w-4 text-gray-500" />
+                        ) : (
+                          campaignStat?.stats.total_followers_gained || 0
+                        )}
                       </CardDescription>
                     </CardHeader>
                   </Card>
@@ -124,7 +139,11 @@ function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
                     <CardHeader>
                       <CardTitle>Unfollowed</CardTitle>
                       <CardDescription>
-                        {data?.followers.length}
+                        {isCampaignStatsLoading ? (
+                          <Loader2 className="animate-spin h-4 w-4 text-gray-500" />
+                        ) : (
+                          campaignStat?.stats.total_unfollowed_accounts || 0
+                        )}
                       </CardDescription>
                     </CardHeader>
                   </Card>

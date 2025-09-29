@@ -1,5 +1,6 @@
 import type { CampaignFollowers } from "~/types/Campaigns";
 import type { ColumnDef } from "@tanstack/react-table";
+import { format } from "date-fns";
 import {
   Table,
   TableHeader,
@@ -67,7 +68,9 @@ const columns: ColumnDef<AccountToFollow>[] = [
     },
     cell: ({ row }) =>
       row.getValue("is_following_me") ? (
-        <Badge variant="success">Yes</Badge>
+        <Badge variant="success">
+          {format(new Date(row.getValue("is_following_me")), "dd MMM yyyy")}
+        </Badge>
       ) : (
         <Badge variant="destructive">No</Badge>
       ),

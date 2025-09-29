@@ -173,8 +173,76 @@ def get_all_followers_for_account(handle: str, user_did: str = None) -> List[Dic
         return []
 
 
+def get_user_current_followers(user_did: str) -> set:
+    """
+    Get all current followers for a user to exclude them from campaign targets.
+
+    Args:
+        user_did: The user's DID
+
+    Returns:
+        Set of follower handles that are already following the user
+    """
+    try:
+        task_logger.info(f"Fetching current followers for user: {user_did}")
+
+        current_followers = set()
+        cursor = None
+        page_count = 0
+        max_pages = 50  # Limit to prevent excessive API calls (5000 followers max)
+
+        while page_count < max_pages:
+            try:
+                page_count += 1
+
+                # Build followers URL with pagination
+                followers_url = f"https://public.api.bsky.app/xrpc/app.bsky.graph.getFollowers?actor={user_did}&limit=100"
+                if cursor:
+                    followers_url += f"&cursor={cursor}"
+
+                task_logger.debug(f"Fetching followers page {page_count} for user")
+
+                # Rate limiting
+                time.sleep(1)
+
+                resp = req("GET", followers_url, timeout=30)
+
+                if resp.status_code not in [200, 201]:
+                    task_logger.error(f"Error fetching user followers: HTTP {resp.status_code}")
+                    break
+
+                data = resp.json()
+                page_followers = data.get("followers", [])
+
+                # Add handles to the set
+                for follower in page_followers:
+                    handle = follower.get("handle", "")
+                    if handle:
+                        current_followers.add(handle.lower())  # Normalize to lowercase
+
+                task_logger.debug(f"Page {page_count}: Found {len(page_followers)} followers, total: {len(current_followers)}")
+
+                # Get cursor for next page
+                cursor = data.get("cursor", None)
+
+                # Break if no more pages
+                if not cursor or len(page_followers) == 0:
+                    break
+
+            except Exception as e:
+                task_logger.error(f"Error fetching followers page {page_count}: {e}")
+                break
+
+        task_logger.info(f"Found {len(current_followers)} current followers for user")
+        return current_followers
+
+    except Exception as e:
+        log_exception(task_logger, "Error getting user current followers", e)
+        return set()
+
+
 def save_followers_to_db(
-    campaign_id: int, account_handle: str, followers: List[Dict]
+    campaign_id: int, account_handle: str, followers: List[Dict], exclude_followers: set = None
 ) -> None:
     """
     Save followers to the followers_to_get table.
@@ -183,8 +251,12 @@ def save_followers_to_db(
         campaign_id: The campaign ID
         account_handle: The account handle these followers belong to
         followers: List of follower data from Bluesky API
+        exclude_followers: Set of follower handles to exclude (already following us)
     """
-    print(f"Saving {len(followers)} followers for {account_handle} to database")
+    if exclude_followers is None:
+        exclude_followers = set()
+
+    task_logger.info(f"Saving {len(followers)} followers for {account_handle} to database (excluding {len(exclude_followers)} existing followers)")
 
     # Create a fresh database session for this operation
     from routes.utils.postgres_connection import SessionLocal
@@ -202,38 +274,54 @@ def save_followers_to_db(
         for row in existing_followers:
             existing_handles.add(row[0])
 
-        # Prepare new followers data, filtering out existing ones
+        # Prepare new followers data, filtering out existing ones and current followers
         new_followers = []
+        excluded_existing = 0
+        excluded_current_followers = 0
+
         for follower in followers:
             follower_handle = follower.get("handle", "")
-            if follower_handle and follower_handle not in existing_handles:
-                new_follower = FollowersToGet(
-                    campaign_id=campaign_id,
-                    account_handle=follower_handle,
-                    me_following=None,  # Will be set to timestamp when followed
-                    is_following_me=None,  # Will be set to timestamp when they follow back
-                )
-                new_followers.append(new_follower)
+            if not follower_handle:
+                continue
+
+            # Skip if already in database
+            if follower_handle in existing_handles:
+                excluded_existing += 1
+                continue
+
+            # Skip if already following us
+            if follower_handle.lower() in exclude_followers:
+                excluded_current_followers += 1
+                continue
+
+            new_follower = FollowersToGet(
+                campaign_id=campaign_id,
+                account_handle=follower_handle,
+                me_following=None,  # Will be set to timestamp when followed
+                is_following_me=None,  # Will be set to timestamp when they follow back
+            )
+            new_followers.append(new_follower)
 
         if new_followers:
             # Bulk insert new followers
             db.add_all(new_followers)
             db.commit()
 
-            print(
+            task_logger.info(
                 f"Successfully added {len(new_followers)} new followers for {account_handle}"
             )
-            print(f"Skipped {len(followers) - len(new_followers)} existing followers")
+            task_logger.info(f"Excluded {excluded_existing} existing followers from database")
+            task_logger.info(f"Excluded {excluded_current_followers} accounts already following us")
 
             # Track followers processed
             track_followers_processed(str(campaign_id), len(new_followers))
         else:
-            print(
-                f"All {len(followers)} followers for {account_handle} already exist in database"
+            task_logger.info(
+                f"No new followers to add for {account_handle}. Excluded: {excluded_existing} existing + {excluded_current_followers} current followers"
             )
 
     except Exception as e:
-        print(f"Error saving followers for {account_handle}: {e}")
+        log_exception(task_logger, f"Error saving followers for {account_handle}", e)
         db.rollback()
         # Track error
         track_rq_job("campaign_get_all_followers", "error")
@@ -285,6 +373,11 @@ def process_campaign_task(campaign_data: Dict[str, Any]) -> str:
     finally:
         db.close()
 
+    # Get user's current followers to exclude them from campaign
+    task_logger.info("Getting user's current followers to exclude from campaign...")
+    current_followers = get_user_current_followers(campaign_user_did)
+    task_logger.info(f"Found {len(current_followers)} current followers to exclude")
+
     # Process each account in followers_to_get
     if followers_to_get:
         print(f"Processing {len(followers_to_get)} accounts for followers...")
@@ -309,14 +402,14 @@ def process_campaign_task(campaign_data: Dict[str, Any]) -> str:
                 )
 
                 if followers:
-                    # Save followers to database
-                    save_followers_to_db(campaign_id, account_handle, followers)
-                    print(f"Saved {len(followers)} followers for {account_handle}")
+                    # Save followers to database (excluding current followers)
+                    save_followers_to_db(campaign_id, account_handle, followers, current_followers)
+                    task_logger.info(f"Processed {len(followers)} followers for {account_handle}")
                 else:
-                    print(f"No followers found for {account_handle}")
+                    task_logger.info(f"No followers found for {account_handle}")
 
             except Exception as e:
-                print(f"Error processing account {account}: {e}")
+                log_exception(task_logger, f"Error processing account {account}", e)
                 continue  # Continue with next account
 
         task_logger.info(f"Completed processing all accounts for campaign: {campaign_name}")
