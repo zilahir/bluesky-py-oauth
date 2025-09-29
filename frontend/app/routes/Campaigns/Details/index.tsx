@@ -48,8 +48,6 @@ function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
     );
   }
 
-  console.log("Campaign Stats", campaignStat);
-
   return (
     <>
       <div>
@@ -213,5 +211,9 @@ function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
     </>
   );
 }
+
+export const handle = {
+  demo: true,
+};
 
 export default CampaignDetailsPage;

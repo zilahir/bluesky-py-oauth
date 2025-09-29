@@ -1,4 +1,6 @@
-import { AppSidebar } from "~/components/app-sidebar"
+import type { ReactElement } from "react";
+import { useMatches } from "react-router";
+import { AppSidebar } from "~/components/app-sidebar";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -6,15 +8,17 @@ import {
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
-} from "~/components/ui/breadcrumb"
-import { Separator } from "~/components/ui/separator"
+} from "~/components/ui/breadcrumb";
+import { Separator } from "~/components/ui/separator";
 import {
   SidebarInset,
   SidebarProvider,
   SidebarTrigger,
-} from "~/components/ui/sidebar"
+} from "~/components/ui/sidebar";
 
-export default function Page() {
+function Page(): ReactElement {
+  const matches = useMatches();
+
   return (
     <SidebarProvider>
       <AppSidebar />
@@ -51,5 +55,7 @@ export default function Page() {
         </div>
       </SidebarInset>
     </SidebarProvider>
-  )
+  );
 }
+
+export default Page;

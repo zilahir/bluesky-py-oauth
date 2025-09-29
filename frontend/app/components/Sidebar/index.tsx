@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import { Outlet } from "react-router";
+import { Link, Outlet, useMatches } from "react-router";
 import { AppSidebar } from "~/components/app-sidebar";
 import {
   Breadcrumb,
@@ -17,6 +17,14 @@ import {
 } from "~/components/ui/sidebar";
 
 function Sidebar(): ReactElement {
+  const matches = useMatches();
+  console.log("Sidebar matches", matches);
+
+  function getBreadcrumbTarget(match: string) {
+    if (match === "root") {
+      return "Dashboard";
+    }
+  }
   return (
     <SidebarProvider>
       <AppSidebar />
@@ -30,15 +38,18 @@ function Sidebar(): ReactElement {
             />
             <Breadcrumb>
               <BreadcrumbList>
-                <BreadcrumbItem className="hidden md:block">
-                  <BreadcrumbLink href="#">
-                    Building Your Application
-                  </BreadcrumbLink>
-                </BreadcrumbItem>
-                <BreadcrumbSeparator className="hidden md:block" />
-                <BreadcrumbItem>
-                  <BreadcrumbPage>Data Fetching</BreadcrumbPage>
-                </BreadcrumbItem>
+                {matches.map((match, index) => (
+                  <>
+                    <BreadcrumbItem className="hidden md:block">
+                      <BreadcrumbLink asChild>
+                        <Link to="/">
+                          {getBreadcrumbTarget(match.id) || match.id}
+                        </Link>
+                      </BreadcrumbLink>
+                    </BreadcrumbItem>
+                    <BreadcrumbSeparator className="hidden md:block" />
+                  </>
+                ))}
               </BreadcrumbList>
             </Breadcrumb>
           </div>
