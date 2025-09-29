@@ -8,10 +8,10 @@ This worker handles the daily execution of active campaigns:
 """
 
 import time
-from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from datetime import datetime
+from typing import Dict, Any
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, func
+from sqlalchemy import and_, func
 
 from routes.utils.postgres_connection import (
     get_db,
@@ -610,7 +610,9 @@ class DailyCampaignWorker:
                 followers_resp = req("GET", followers_url, timeout=30)
 
                 if followers_resp.status_code not in [200, 201]:
-                    campaign_logger.error(f"Failed to get followers: HTTP {followers_resp.status_code}")
+                    campaign_logger.error(
+                        f"Failed to get followers: HTTP {followers_resp.status_code}"
+                    )
                     break
 
                 followers_data = followers_resp.json()
