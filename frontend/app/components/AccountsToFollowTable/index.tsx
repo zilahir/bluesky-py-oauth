@@ -48,7 +48,9 @@ const columns: ColumnDef<AccountToFollow>[] = [
     },
     cell: ({ row }) =>
       row.getValue("me_following") ? (
-        <Badge variant="success">Yes</Badge>
+        <Badge variant="success">
+          {format(new Date(row.getValue("me_following")), "dd MMM yyyy")}
+        </Badge>
       ) : (
         <Badge variant="destructive">No</Badge>
       ),

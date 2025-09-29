@@ -25,6 +25,7 @@ import {
 import ConfirmDeleteCampaignDialog from "~/components/ConfirmDeletCampaignDialog";
 import useCampaignStats from "~/hooks/useCampaignStats";
 import { Progress } from "~/components/ui/progress";
+import { format, formatRelative, intervalToDuration } from "date-fns";
 
 function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
   const { id } = params;
@@ -82,11 +83,30 @@ function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
                   </span>
                 </CardTitle>
                 <CardDescription>
-                  {new Date(data?.created_at).toLocaleDateString("en-US", {
-                    year: "numeric",
-                    month: "long",
-                    day: "numeric",
-                  })}
+                  <p className="flex flex-row items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {format(new Date(data?.created_at), "dd MMM yyyy HH:mm")}
+                    </span>
+                    |
+                    <span className="text-xs text-muted-foreground">
+                      {Object.keys(
+                        intervalToDuration({
+                          start: new Date(data?.created_at),
+                          end: new Date(),
+                        }),
+                      )
+                        .map((key) => {
+                          const value = intervalToDuration({
+                            start: new Date(data?.created_at),
+                            end: new Date(),
+                          })[
+                            key as keyof ReturnType<typeof intervalToDuration>
+                          ];
+                          return value ? `${value} ${key} ` : "";
+                        })
+                        .join(" ")}
+                    </span>
+                  </p>
                 </CardDescription>
                 <CardAction>
                   <DropdownMenu>
