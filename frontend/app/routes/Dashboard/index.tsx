@@ -1,11 +1,8 @@
 import type { ReactElement } from "react";
+import { Outlet } from "react-router";
 
 function Dashboard(): ReactElement {
-  return (
-    <div>
-      <p>Dashboard</p>
-    </div>
-  );
+  return <Outlet />;
 }
 
 export default Dashboard;
