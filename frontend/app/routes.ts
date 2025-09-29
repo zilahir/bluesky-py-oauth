@@ -15,6 +15,7 @@ export default [
 
   layout("./layouts/Auth/index.tsx", [
     route("/", "./routes/Dashboard/index.tsx", [
+      index("./routes/home.tsx"),
       route("/logout", "routes/LogOut/index.tsx"),
       route("account", "./routes/Account/index.tsx"),
 

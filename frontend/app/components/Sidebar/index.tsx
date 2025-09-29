@@ -33,6 +33,10 @@ function Sidebar(): ReactElement {
       return "Campaigns";
     }
     if (matchId === "routes/Campaigns/Details/index") {
+      const thisMatch = matches.find(({ id }) => id === matchId);
+      if (thisMatch && thisMatch.loaderData && thisMatch.loaderData.campaign) {
+        return thisMatch.loaderData.campaign.name;
+      }
       return "Campaign Details";
     }
     if (matchId === "routes/NewCampaign/index") {
@@ -62,13 +66,14 @@ function Sidebar(): ReactElement {
                     (match) =>
                       !match.id.includes("layouts/Auth") &&
                       match.id !== "routes/Dashboard/Home/index" &&
-                      match.id !== "root",
+                      match.id !== "root" &&
+                      match.id !== "routes/home",
                   )
                   .map((match, index, filteredMatches) => (
                     <div key={match.id} className="flex items-center">
                       <BreadcrumbItem className="hidden md:block">
                         {index === filteredMatches.length - 1 ? (
-                          <BreadcrumbPage>
+                          <BreadcrumbPage className="capitalize">
                             {getBreadcrumbTarget(match)}
                           </BreadcrumbPage>
                         ) : (

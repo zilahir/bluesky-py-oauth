@@ -10,10 +10,8 @@ interface CampaignResponse {
   data: Campaign;
 }
 
-async function getCampaign(id: string) {
-  const response = await apiClient.get<CampaignResponse>(
-    `/api/campaign/${id}`,
-  );
+export async function getCampaign(id: string) {
+  const response = await apiClient.get<CampaignResponse>(`/api/campaign/${id}`);
 
   return response.data;
 }

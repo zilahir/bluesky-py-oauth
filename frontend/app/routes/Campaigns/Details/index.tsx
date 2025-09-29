@@ -1,6 +1,6 @@
 import { type ReactElement, useState } from "react";
 import type { Route } from "./+types";
-import useCampaign from "~/hooks/useCampaign";
+import useCampaign, { getCampaign } from "~/hooks/useCampaign";
 import { EllipsisIcon, Loader2 } from "lucide-react";
 import {
   Card,
@@ -26,6 +26,21 @@ import ConfirmDeleteCampaignDialog from "~/components/ConfirmDeletCampaignDialog
 import useCampaignStats from "~/hooks/useCampaignStats";
 import { Progress } from "~/components/ui/progress";
 import { format, formatRelative, intervalToDuration } from "date-fns";
+
+export async function clientLoader({ params }: Route.LoaderArgs) {
+  const { id } = params;
+
+  const campaign = await getCampaign(id);
+
+  return {
+    campaign: {
+      name: campaign.data.name,
+      id: campaign.data.id,
+      is_campaign_running: campaign.data.is_campaign_running,
+      is_setup_job_running: campaign.data.is_setup_job_running,
+    },
+  };
+}
 
 function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
   const { id } = params;
