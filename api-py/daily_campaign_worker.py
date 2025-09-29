@@ -470,14 +470,18 @@ class DailyCampaignWorker:
                 return False
 
             # Step 2: Find our follow records to locate the specific one for this account
-            list_records_url = (
-                f"{oauth_session.pds_url}/xrpc/com.atproto.repo.listRecords"
-            )
+            # Construct URL with query parameters for GET request
             list_records_params = {
                 "repo": oauth_session.did,
                 "collection": "app.bsky.graph.follow",
                 "limit": 100,  # Get recent follows
             }
+
+            # Build query string
+            from urllib.parse import urlencode
+
+            query_string = urlencode(list_records_params)
+            list_records_url = f"{oauth_session.pds_url}/xrpc/com.atproto.repo.listRecords?{query_string}"
 
             list_resp = pds_authed_req(
                 "GET",
@@ -487,7 +491,6 @@ class DailyCampaignWorker:
                 user_did=oauth_session.did,
                 db=db,
                 dpop_pds_nonce=getattr(oauth_session, "dpop_pds_nonce", "") or "",
-                body=list_records_params,
             )
 
             if list_resp.status_code not in [200, 201]:
@@ -567,7 +570,7 @@ class DailyCampaignWorker:
     def check_if_following_back(
         self, account_handle: str, oauth_session, db: Session
     ) -> bool:
-        """Check if an account is following us back"""
+        """Check if an account is following us back by checking our followers"""
         try:
             campaign_logger.debug(f"Checking if {account_handle} is following back")
 
@@ -584,51 +587,48 @@ class DailyCampaignWorker:
                 campaign_logger.warning(f"No DID found for {account_handle}")
                 return False
 
-            # Step 2: Check their follow records to see if they follow us
-            list_records_url = (
-                f"{oauth_session.pds_url}/xrpc/com.atproto.repo.listRecords"
-            )
-            list_records_params = {
-                "repo": target_did,
-                "collection": "app.bsky.graph.follow",
-                "limit": 100,  # Get recent follows
+            # Step 2: Check if they appear in our followers list
+            # Use public API to get our followers
+            from urllib.parse import urlencode
+
+            followers_params = {
+                "actor": oauth_session.did,
+                "limit": 100,
             }
 
-            # Use public API endpoint for listing records (no auth needed for public records)
-            public_list_url = (
-                f"https://public.api.bsky.app/xrpc/com.atproto.repo.listRecords"
-            )
+            query_string = urlencode(followers_params)
+            followers_url = f"https://public.api.bsky.app/xrpc/app.bsky.graph.getFollowers?{query_string}"
 
-            list_resp = req(
-                "GET", public_list_url, params=list_records_params, timeout=30
-            )
+            # Check multiple pages if necessary (limited search for performance)
+            for page in range(3):  # Check first 3 pages (300 followers max)
+                if page > 0:
+                    # Add cursor for pagination
+                    followers_params["cursor"] = cursor
+                    query_string = urlencode(followers_params)
+                    followers_url = f"https://public.api.bsky.app/xrpc/app.bsky.graph.getFollowers?{query_string}"
 
-            if list_resp.status_code not in [200, 201]:
-                # If public API fails, try authenticated request
-                list_resp = pds_authed_req(
-                    "GET",
-                    list_records_url,
-                    access_token=oauth_session.access_token,
-                    dpop_private_jwk_json=oauth_session.dpop_private_jwk,
-                    user_did=oauth_session.did,
-                    db=db,
-                    dpop_pds_nonce=getattr(oauth_session, "dpop_pds_nonce", "") or "",
-                    body=list_records_params,
-                )
+                followers_resp = req("GET", followers_url, timeout=30)
 
-            if list_resp.status_code not in [200, 201]:
-                campaign_logger.error(
-                    f"Failed to list {account_handle}'s follow records: HTTP {list_resp.status_code}"
-                )
-                return False
+                if followers_resp.status_code not in [200, 201]:
+                    campaign_logger.error(f"Failed to get followers: HTTP {followers_resp.status_code}")
+                    break
 
-            # Step 3: Search for our DID in their follow records
-            follow_records = list_resp.json().get("records", [])
+                followers_data = followers_resp.json()
+                followers = followers_data.get("followers", [])
 
-            for record in follow_records:
-                if record.get("value", {}).get("subject") == oauth_session.did:
-                    campaign_logger.info(f"✓ {account_handle} is following back!")
-                    return True
+                # Check if target_did is in our followers
+                for follower in followers:
+                    if follower.get("did") == target_did:
+                        campaign_logger.info(f"✓ {account_handle} is following back!")
+                        return True
+
+                # Check if there are more pages
+                cursor = followers_data.get("cursor")
+                if not cursor or len(followers) == 0:
+                    break
+
+                # Rate limiting between pages
+                time.sleep(1)
 
             campaign_logger.debug(f"✗ {account_handle} is not following back")
             return False
@@ -688,4 +688,3 @@ def process_daily_campaigns() -> str:
     """Main entry point for daily campaign processing worker"""
     worker = DailyCampaignWorker()
     return worker.process_all_active_campaigns()
-
