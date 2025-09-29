@@ -9,6 +9,7 @@ from authlib.oauth2.rfc7636 import create_s256_code_challenge
 
 from atproto_security import is_safe_url, hardened_http
 from oauth_metadata import OauthMetadata
+from logger_config import oauth_logger
 
 
 # Checks an Authorization Server metadata response against atproto OAuth requirements
@@ -349,7 +350,16 @@ def pds_dpop_jwt(
 
 # Helper to demonstrate making a request (HTTP GET or POST) to the user's PDS ("Resource Server" in OAuth terminology) using DPoP and access token.
 # This method returns a 'requests' response, without checking status code.
-def pds_authed_req(method: str, url: str, access_token: str, dpop_private_jwk_json: str, user_did: str, db, dpop_pds_nonce: str = "", body=None) -> Any:
+def pds_authed_req(
+    method: str,
+    url: str,
+    access_token: str,
+    dpop_private_jwk_json: str,
+    user_did: str,
+    db,
+    dpop_pds_nonce: str = "",
+    body=None,
+) -> Any:
     dpop_private_jwk = JsonWebKey.import_key(json.loads(dpop_private_jwk_json))
 
     # Might need to retry request with a new nonce.
@@ -374,13 +384,18 @@ def pds_authed_req(method: str, url: str, access_token: str, dpop_private_jwk_js
             )
 
         # If we got a new server-provided DPoP nonce, store it in database and retry.
-        # NOTE: the type of error might also be communicated in the `WWW-Authenticate` HTTP response header.
         if resp.status_code in [400, 401]:
+            oauth_logger.error(
+                f"PDS HTTP Error {resp.status_code} for {method} {url}: {resp.text}, body={body}"
+            )
             try:
                 error_data = resp.json()
                 if error_data.get("error") == "use_dpop_nonce":
+                    oauth_logger.info(f"DPoP nonce error: {error_data}")
                     dpop_pds_nonce = resp.headers["DPoP-Nonce"]
-                    print(f"retrying with new PDS DPoP nonce: {dpop_pds_nonce}")
+                    oauth_logger.info(
+                        f"Retrying PDS request with new DPoP nonce: {dpop_pds_nonce}"
+                    )
 
                     # Update PostgreSQL database using SQLAlchemy
                     try:
@@ -388,7 +403,11 @@ def pds_authed_req(method: str, url: str, access_token: str, dpop_private_jwk_js
                         from routes.utils.postgres_connection import OAuthSession
 
                         # Update the session with new nonce
-                        oauth_session = db.query(OAuthSession).filter(OAuthSession.did == user_did).first()
+                        oauth_session = (
+                            db.query(OAuthSession)
+                            .filter(OAuthSession.did == user_did)
+                            .first()
+                        )
                         if oauth_session:
                             oauth_session.dpop_pds_nonce = dpop_pds_nonce
                             db.commit()

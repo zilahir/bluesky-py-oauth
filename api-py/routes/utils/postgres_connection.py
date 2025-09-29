@@ -141,9 +141,35 @@ class FollowersToGet(Base):
     account_handle = Column(String(255), nullable=False, index=True)
     me_following = Column(DateTime(timezone=True), nullable=True)
     is_following_me = Column(DateTime(timezone=True), nullable=True)
+    unfollowed_at = Column(DateTime(timezone=True), nullable=True)
+    follow_attempt_count = Column(Integer, nullable=False, default=0)
+    unfollow_attempt_count = Column(Integer, nullable=False, default=0)
+    last_checked_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(50), nullable=False, default="ready_to_follow")
     created_at = Column(
         DateTime(timezone=True), nullable=False, default=datetime.utcnow
     )
     updated_at = Column(
         DateTime(timezone=True), nullable=False, default=datetime.utcnow
     )
+
+
+class CampaignExecutionLog(Base):
+    __tablename__ = "campaign_execution_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(
+        Integer,
+        ForeignKey("campaigns.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    execution_date = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    follows_count = Column(Integer, nullable=False, default=0)
+    unfollows_count = Column(Integer, nullable=False, default=0)
+    follow_backs_count = Column(Integer, nullable=False, default=0)
+    errors_count = Column(Integer, nullable=False, default=0)
+    execution_duration_seconds = Column(Integer, nullable=True)
+    status = Column(String(50), nullable=False, default="success")  # success, failed, partial
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

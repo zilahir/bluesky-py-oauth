@@ -16,6 +16,7 @@ export default [
   layout("./layouts/Auth/index.tsx", [
     index("./routes/Dashboard/index.tsx"),
     route("/logout", "routes/LogOut/index.tsx"),
+    route("account", "./routes/Account/index.tsx"),
 
     ...prefix("/campaigns", [
       index("./routes/Campaigns/index.tsx"),

@@ -45,7 +45,33 @@ services:
     build:
       context: ./api-py
       dockerfile: Dockerfile
-    command: python worker.py
+    command: python -u worker.py
+    env_file:
+      - ./api-py/.env
+    volumes:
+      - ./api-py:/app
+    networks:
+      - app-network
+    depends_on:
+      psql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    develop:
+      watch:
+        - action: sync
+          path: ./api-py
+          target: /app
+          ignore:
+            - __pycache__/
+            - .venv/
+
+  scheduler:
+    build:
+      context: ./api-py
+      dockerfile: Dockerfile
+    command: python -u worker.py --scheduler
     env_file:
       - ./api-py/.env
     volumes:

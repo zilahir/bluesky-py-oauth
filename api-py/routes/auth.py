@@ -330,12 +330,12 @@ def oauth_logout(
     )
 
 
-@router.get("/oauth/refresh")
+@router.post("/oauth/refresh")
 def oauth_refresh(
     request: Request,
     user=Depends(get_logged_in_user),
     db: Session = Depends(get_db),
-    settings=Depends(get_settings)
+    settings=Depends(get_settings),
 ):
     """
     Refresh the OAuth tokens for the current user.
@@ -345,7 +345,9 @@ def oauth_refresh(
     """
     try:
         # Get the app URL from the request
-        app_url = str(request.url).replace("http://", "https://").split("/oauth/refresh")[0]
+        app_url = (
+            str(request.url).replace("http://", "https://").split("/oauth/refresh")[0]
+        )
 
         # Create user dict in the format expected by refresh_token_request
         user_dict = {
@@ -370,10 +372,12 @@ def oauth_refresh(
 
         print(f"Token refreshed successfully for user: {user.did}")
 
-        return JSONResponse({
-            "message": "Token refreshed successfully",
-            "timestamp": user.updated_at.isoformat() if user.updated_at else None
-        })
+        return JSONResponse(
+            {
+                "message": "Token refreshed successfully",
+                "timestamp": user.updated_at.isoformat() if user.updated_at else None,
+            }
+        )
 
     except Exception as e:
         print(f"Error refreshing token for user {user.did}: {e}")

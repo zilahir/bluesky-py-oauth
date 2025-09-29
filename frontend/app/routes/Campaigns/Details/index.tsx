@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { type ReactElement, useState } from "react";
 import type { Route } from "./+types";
 import useCampaign from "~/hooks/useCampaign";
 import { EllipsisIcon, Loader2 } from "lucide-react";
@@ -7,26 +7,38 @@ import {
   CardAction,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "~/components/ui/card";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "~/components/ui/popover";
 import { Button } from "~/components/ui/button";
 import { Badge } from "~/components/ui/badge";
 import AccountsToFollowTable from "~/components/AccountsToFollowTable";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "~/components/ui/dropdown-menu";
+import ConfirmDeleteCampaignDialog from "~/components/ConfirmDeletCampaignDialog";
+import useCampaignStats from "~/hooks/useCampaignStats";
+import { Progress } from "~/components/ui/progress";
+import { format, formatRelative, intervalToDuration } from "date-fns";
 
 function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
-  console.log("CampaignDetailsPage params:", params);
-
   const { id } = params;
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
   const { data, isLoading } = useCampaign({
     id,
   });
+
+  const { data: campaignStat, isLoading: isCampaignStatsLoading } =
+    useCampaignStats({
+      campaignId: id,
+    });
 
   if (isLoading) {
     return (
@@ -36,92 +48,169 @@ function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
     );
   }
 
-  console.log("CampaignDetailsPage data:", data);
-  return (
-    <div>
-      {!isLoading && data?.is_setup_job_running && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Hang tight!</CardTitle>
-            <CardDescription>
-              Your campaign is currently being set up
-            </CardDescription>
-          </CardHeader>
+  console.log("Campaign Stats", campaignStat);
 
-          <CardContent>
-            <Loader2 className="animate-spin h-10 w-10 text-gray-500" />
-          </CardContent>
-        </Card>
-      )}
-      {!isLoading && data && !data?.is_setup_job_running && (
-        <div className="space-y-6">
+  return (
+    <>
+      <div>
+        {!isLoading && data?.is_setup_job_running && (
           <Card>
             <CardHeader>
-              <CardTitle className="capitalize flex items-center flex-row gap-2">
-                <span>{data?.name}</span>
-                <span>
-                  {data?.is_campaign_running && (
-                    <Badge>
-                      <Loader2 className="animate-spin" />
-                      Running
-                    </Badge>
-                  )}
-                </span>
-              </CardTitle>
+              <CardTitle>Hang tight!</CardTitle>
               <CardDescription>
-                {new Date(data?.created_at).toLocaleDateString("en-US", {
-                  year: "numeric",
-                  month: "long",
-                  day: "numeric",
-                })}
+                Your campaign is currently being set up
               </CardDescription>
-              <CardAction>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="ghost" size="icon">
-                      <EllipsisIcon className="h-4 w-4" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent>
-                    <Button size="sm" variant="destructive">
-                      Stop Campaign
-                    </Button>
-                  </PopoverContent>
-                </Popover>
-              </CardAction>
             </CardHeader>
+
             <CardContent>
-              <div className="grid grid-cols-3 gap-3">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Total accounts to get</CardTitle>
-                    <CardDescription>{data?.followers.length}</CardDescription>
-                  </CardHeader>
-                </Card>
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Followers gained</CardTitle>
-                    <CardDescription>{data?.followers.length}</CardDescription>
-                  </CardHeader>
-                </Card>
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Unfollowed</CardTitle>
-                    <CardDescription>{data?.followers.length}</CardDescription>
-                  </CardHeader>
-                </Card>
-              </div>
+              <Loader2 className="animate-spin h-10 w-10 text-gray-500" />
             </CardContent>
           </Card>
-          <div className="space-y-3">
-            <h1 className="text-xl font-semibold text-foreground">
-              Accounts to follow
-            </h1>
-            <AccountsToFollowTable data={data.followers} />
+        )}
+        {!isLoading && data && !data?.is_setup_job_running && (
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="capitalize flex items-center flex-row gap-2">
+                  <span>{data?.name}</span>
+                  <span>
+                    {data?.is_campaign_running && (
+                      <Badge>
+                        <Loader2 className="animate-spin" />
+                        Running
+                      </Badge>
+                    )}
+                  </span>
+                </CardTitle>
+                <CardDescription>
+                  <p className="flex flex-row items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {format(new Date(data?.created_at), "dd MMM yyyy HH:mm")}
+                    </span>
+                    |
+                    <span className="text-xs text-muted-foreground">
+                      {Object.keys(
+                        intervalToDuration({
+                          start: new Date(data?.created_at),
+                          end: new Date(),
+                        }),
+                      )
+                        .map((key) => {
+                          const value = intervalToDuration({
+                            start: new Date(data?.created_at),
+                            end: new Date(),
+                          })[
+                            key as keyof ReturnType<typeof intervalToDuration>
+                          ];
+                          return value ? `${value} ${key} ` : "";
+                        })
+                        .join(" ")}
+                    </span>
+                  </p>
+                </CardDescription>
+                <CardAction>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" className="h-8 w-8 p-0">
+                        <span className="sr-only">Open menu</span>
+                        <EllipsisIcon />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setIsDeleteDialogOpen(true);
+                        }}
+                      >
+                        Delete Campaign
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </CardAction>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-3 gap-3">
+                  <Card>
+                    <CardHeader>
+                      <CardDescription>Total accounts to get</CardDescription>
+
+                      <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
+                        {isCampaignStatsLoading ? (
+                          <Loader2 className="animate-spin h-4 w-4 text-gray-500" />
+                        ) : (
+                          campaignStat?.stats.total_targets || 0
+                        )}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardFooter className="text-xs text-muted-foreground">
+                      The total number of followers you want to gain in this
+                      campaign.
+                    </CardFooter>
+                  </Card>
+                  <Card>
+                    <CardHeader>
+                      <CardDescription>Followers gained</CardDescription>
+                      <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
+                        {isCampaignStatsLoading ? (
+                          <Loader2 className="animate-spin h-4 w-4 text-gray-500" />
+                        ) : (
+                          campaignStat?.stats.total_followers_gained || 0
+                        )}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardFooter className="text-xs text-muted-foreground">
+                      The number of followers gained in this campaign.
+                    </CardFooter>
+                  </Card>
+                  <Card>
+                    <CardHeader>
+                      <CardDescription>Unfollowed</CardDescription>
+
+                      <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
+                        {isCampaignStatsLoading ? (
+                          <Loader2 className="animate-spin h-4 w-4 text-gray-500" />
+                        ) : (
+                          campaignStat?.stats.total_unfollowed_accounts || 0
+                        )}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardFooter className="text-xs text-muted-foreground">
+                      The number of accounts unfollowed in this campaign.
+                    </CardFooter>
+                  </Card>
+                </div>
+              </CardContent>
+              <CardFooter>
+                {!isCampaignStatsLoading && campaignStat && (
+                  <Progress
+                    value={
+                      (campaignStat?.stats.total_followers_gained /
+                        campaignStat?.stats.total_targets) *
+                        100 || 0
+                    }
+                  />
+                )}
+              </CardFooter>
+            </Card>
+            <div className="space-y-3">
+              <h1 className="text-xl font-semibold text-foreground">
+                Accounts to follow
+              </h1>
+              <AccountsToFollowTable data={data.followers} />
+            </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+
+      <ConfirmDeleteCampaignDialog
+        open={isDeleteDialogOpen}
+        onOpenChange={setIsDeleteDialogOpen}
+        campaignId={id}
+      />
+    </>
   );
 }
 

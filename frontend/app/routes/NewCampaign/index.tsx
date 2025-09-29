@@ -110,9 +110,12 @@ function NewCampaignPage(): ReactElement {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
+            <div className="">
               <Form {...form}>
-                <form onSubmit={form.handleSubmit(handleCreateCampaign)}>
+                <form
+                  className="space-y-4"
+                  onSubmit={form.handleSubmit(handleCreateCampaign)}
+                >
                   <FormField
                     control={form.control}
                     name="name"
@@ -125,72 +128,84 @@ function NewCampaignPage(): ReactElement {
                       </FormItem>
                     )}
                   />
-                  <Button disabled={isPending || isLoading} type="submit">
-                    {isPending && (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    )}
-                    Create Campaign
-                  </Button>
+                  <div className="space-y-2">
+                    <Label>
+                      Bluesky handle of accouts whos followers you want to
+                      follow you:
+                    </Label>
+                    <div className="flex flex-row items-center gap-2">
+                      <Input
+                        value={newAccountHandle}
+                        onChange={(e) => setNewAccountHandle(e.target.value)}
+                        placeholder="@example"
+                        className=""
+                      />
+                      <Button
+                        onClick={(): Promise<void> =>
+                          handleNewAccount(newAccountHandle)
+                        }
+                        disabled={isLoading}
+                      >
+                        {!isLoading && <PlusIcon />}
+                        {isLoading && (
+                          <Loader2 className="animate-spin h-4 w-4" />
+                        )}
+                        Add
+                      </Button>
+                    </div>
+                  </div>
+
+                  {accounts.length > 0 && (
+                    <div className="space-y-3">
+                      <Label>Added Accounts:</Label>
+                      <ul className="flex flex-row flex-wrap gap-2">
+                        {accounts.map((account) => (
+                          <li
+                            className="flex flex-row gap-2 items-center border p-1 rounded-md"
+                            key={account.account.handle}
+                          >
+                            <Avatar className="h-5 w-5 rounded-full">
+                              <AvatarImage
+                                src={account.account.avatar}
+                                alt={account.account.handle}
+                              />
+                              <AvatarFallback className="rounded-lg">
+                                {account.account.handle
+                                  .slice(1, 3)
+                                  .toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+
+                            <span className="text-sm text-foreground">
+                              {account.account.handle} |{" "}
+                              {account.followers_count} followers
+                            </span>
+                            <button
+                              className="hover:bg-muted py-1 px-2 rounded-md"
+                              onClick={() =>
+                                removeAccount(account.account.handle)
+                              }
+                            >
+                              <CircleXIcon className="size-3" />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  <div className="flex flex-row justify-end">
+                    <Button
+                      disabled={isPending || isLoading || accounts.length === 0}
+                      type="submit"
+                    >
+                      {isPending && (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      )}
+                      Create Campaign
+                    </Button>
+                  </div>
                 </form>
               </Form>
-              <div className="space-y-2">
-                <Label>
-                  Bluesky handle of accouts whos followers you want to follow
-                  you:
-                </Label>
-                <div className="flex flex-row items-center gap-2">
-                  <Input
-                    value={newAccountHandle}
-                    onChange={(e) => setNewAccountHandle(e.target.value)}
-                    placeholder="@example"
-                    className=""
-                  />
-                  <Button
-                    onClick={(): Promise<void> =>
-                      handleNewAccount(newAccountHandle)
-                    }
-                    disabled={isLoading}
-                  >
-                    {!isLoading && <PlusIcon />}
-                    {isLoading && <Loader2 className="animate-spin h-4 w-4" />}
-                    Add
-                  </Button>
-                </div>
-              </div>
-              {accounts.length > 0 && (
-                <div className="space-y-3">
-                  <Label>Added Accounts:</Label>
-                  <ul className="flex flex-row flex-wrap gap-2">
-                    {accounts.map((account) => (
-                      <li
-                        className="flex flex-row gap-2 items-center border p-1 rounded-md"
-                        key={account.account.handle}
-                      >
-                        <Avatar className="h-5 w-5 rounded-full">
-                          <AvatarImage
-                            src={account.account.avatar}
-                            alt={account.account.handle}
-                          />
-                          <AvatarFallback className="rounded-lg">
-                            {account.account.handle.slice(1, 3).toUpperCase()}
-                          </AvatarFallback>
-                        </Avatar>
-
-                        <span className="text-sm text-foreground">
-                          {account.account.handle} | {account.followers_count}{" "}
-                          followers
-                        </span>
-                        <button
-                          className="hover:bg-muted py-1 px-2 rounded-md"
-                          onClick={() => removeAccount(account.account.handle)}
-                        >
-                          <CircleXIcon className="size-3" />
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
             </div>
           </CardContent>
         </Card>
