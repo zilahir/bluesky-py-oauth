@@ -7,6 +7,7 @@ import {
   CardAction,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "~/components/ui/card";
@@ -23,6 +24,7 @@ import {
 } from "~/components/ui/dropdown-menu";
 import ConfirmDeleteCampaignDialog from "~/components/ConfirmDeletCampaignDialog";
 import useCampaignStats from "~/hooks/useCampaignStats";
+import { Progress } from "~/components/ui/progress";
 
 function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
   const { id } = params;
@@ -149,6 +151,17 @@ function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
                   </Card>
                 </div>
               </CardContent>
+              <CardFooter>
+                {!isCampaignStatsLoading && campaignStat && (
+                  <Progress
+                    value={
+                      (campaignStat?.stats.total_followers_gained /
+                        campaignStat?.stats.total_targets) *
+                        100 || 0
+                    }
+                  />
+                )}
+              </CardFooter>
             </Card>
             <div className="space-y-3">
               <h1 className="text-xl font-semibold text-foreground">
