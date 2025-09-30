@@ -9,4 +9,11 @@ function LoginPage(): ReactElement {
   );
 }
 
+export function meta() {
+  return [
+    { title: "Login" },
+    { name: "description", content: "Login with your Bluesky account" },
+  ];
+}
+
 export default LoginPage;
