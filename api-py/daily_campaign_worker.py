@@ -301,8 +301,6 @@ class DailyCampaignWorker:
                     account.me_following = datetime.utcnow()
                     account.status = CAMPAIGN_EXECUTION_STATES["WAITING_FOR_FOLLOWBACK"]
 
-                account.follow_attempt_count += 1
-
                 # Rate limiting
                 time.sleep(self.config.REQUEST_DELAY_SECONDS)
 
