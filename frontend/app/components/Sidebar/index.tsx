@@ -21,7 +21,6 @@ function Sidebar(): ReactElement {
 
   function getBreadcrumbTarget(match: any) {
     const matchId = typeof match === "string" ? match : match.id;
-    const pathname = typeof match === "object" ? match.pathname : "";
 
     if (matchId === "root") {
       return "Home";

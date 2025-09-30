@@ -25,9 +25,20 @@ import {
 import ConfirmDeleteCampaignDialog from "~/components/ConfirmDeletCampaignDialog";
 import useCampaignStats from "~/hooks/useCampaignStats";
 import { Progress } from "~/components/ui/progress";
-import { format, formatRelative, intervalToDuration } from "date-fns";
+import { format, intervalToDuration } from "date-fns";
 
-export async function clientLoader({ params }: Route.LoaderArgs) {
+interface ClientLoaderData {
+  campaign: {
+    name: string;
+    id: string;
+    is_campaign_running: boolean;
+    is_setup_job_running: boolean;
+  };
+}
+
+export async function clientLoader({
+  params,
+}: Route.LoaderArgs): Promise<ClientLoaderData> {
   const { id } = params;
 
   const campaign = await getCampaign(id);
@@ -259,9 +270,5 @@ export function meta({ data: metaRouteData }: Route.MetaArgs) {
     },
   ];
 }
-
-export const handle = {
-  demo: true,
-};
 
 export default CampaignDetailsPage;
