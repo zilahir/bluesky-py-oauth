@@ -65,6 +65,37 @@ active_campaigns_gauge = Gauge(
     'Number of currently active campaigns'
 )
 
+# Enhanced follow/unfollow metrics
+follow_attempts_total = Counter(
+    'follow_attempts_total',
+    'Total number of follow attempts',
+    ['campaign_id', 'status', 'failure_reason']  # status: success/failed, failure_reason: api_error/network/auth/profile_not_found
+)
+
+unfollow_attempts_total = Counter(
+    'unfollow_attempts_total',
+    'Total number of unfollow attempts',
+    ['campaign_id', 'status', 'failure_reason']
+)
+
+bluesky_api_requests_total = Counter(
+    'bluesky_api_requests_total',
+    'Total number of Bluesky API requests',
+    ['endpoint', 'method', 'status_code']  # endpoint: getProfile/createRecord/deleteRecord/listRecords
+)
+
+bluesky_api_request_duration = Histogram(
+    'bluesky_api_request_duration_seconds',
+    'Duration of Bluesky API requests',
+    ['endpoint', 'method']
+)
+
+authentication_failures_total = Counter(
+    'authentication_failures_total',
+    'Total number of authentication failures',
+    ['failure_type']  # token_expired/invalid_dpop/pds_error
+)
+
 # Middleware for tracking HTTP requests
 async def metrics_middleware(request: Request, call_next):
     """FastAPI middleware to collect HTTP metrics"""
@@ -130,6 +161,45 @@ def update_active_campaigns_count(count: int):
 def update_worker_count(count: int):
     """Update the number of active workers"""
     rq_workers_total.set(count)
+
+# Enhanced tracking functions
+def track_follow_attempt(campaign_id: str, success: bool, failure_reason: str = None):
+    """Track follow attempts with detailed status and failure reasons"""
+    status = "success" if success else "failed"
+    reason = failure_reason or "none"
+    follow_attempts_total.labels(
+        campaign_id=campaign_id,
+        status=status,
+        failure_reason=reason
+    ).inc()
+
+def track_unfollow_attempt(campaign_id: str, success: bool, failure_reason: str = None):
+    """Track unfollow attempts with detailed status and failure reasons"""
+    status = "success" if success else "failed"
+    reason = failure_reason or "none"
+    unfollow_attempts_total.labels(
+        campaign_id=campaign_id,
+        status=status,
+        failure_reason=reason
+    ).inc()
+
+def track_bluesky_api_request(endpoint: str, method: str, status_code: int, duration: float = None):
+    """Track Bluesky API requests"""
+    bluesky_api_requests_total.labels(
+        endpoint=endpoint,
+        method=method,
+        status_code=status_code
+    ).inc()
+
+    if duration is not None:
+        bluesky_api_request_duration.labels(
+            endpoint=endpoint,
+            method=method
+        ).observe(duration)
+
+def track_authentication_failure(failure_type: str):
+    """Track authentication failures"""
+    authentication_failures_total.labels(failure_type=failure_type).inc()
 
 # Metrics endpoint
 def get_metrics():
