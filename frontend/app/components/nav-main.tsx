@@ -1,5 +1,5 @@
 import { AudioWaveformIcon, ChevronRight, type LucideIcon } from "lucide-react";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 
 import {
   Collapsible,
@@ -32,6 +32,11 @@ export function NavMain({
     }[];
   }[];
 }) {
+  const location = useLocation();
+
+  function isCurrentCampaignOpen(url: string): boolean {
+    return location.pathname.startsWith(url);
+  }
   return (
     <SidebarGroup>
       <SidebarGroupLabel>Platform</SidebarGroupLabel>
@@ -62,7 +67,10 @@ export function NavMain({
                 <SidebarMenuSub>
                   {item.items?.map((subItem) => (
                     <SidebarMenuSubItem key={subItem.title}>
-                      <SidebarMenuSubButton asChild>
+                      <SidebarMenuSubButton
+                        isActive={isCurrentCampaignOpen(subItem.url)}
+                        asChild
+                      >
                         <Link to={subItem.url}>
                           {subItem.icon && <subItem.icon />}
                           <span>{subItem.title}</span>
