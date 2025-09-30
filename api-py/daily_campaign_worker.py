@@ -28,7 +28,8 @@ from metrics import (
     track_follow_attempt,
     track_unfollow_attempt,
     track_bluesky_api_request,
-    track_authentication_failure
+    track_authentication_failure,
+    update_active_campaigns_count
 )
 from logger_config import campaign_logger, log_exception, log_campaign_event
 
@@ -76,6 +77,9 @@ class DailyCampaignWorker:
                 campaign_logger.info(
                     f"Found {len(active_campaigns)} active campaigns to process"
                 )
+
+                # Update Prometheus metric with current active campaign count
+                update_active_campaigns_count(len(active_campaigns))
 
                 if self.config.DEBUG_MODE:
                     for campaign in active_campaigns:
