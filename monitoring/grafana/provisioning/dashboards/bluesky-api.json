@@ -1,31 +1,297 @@
 {
   "id": null,
-  "title": "Bluesky API Monitoring",
-  "tags": ["bluesky", "api"],
+  "title": "Bluesky Campaign Monitoring Dashboard",
+  "tags": ["bluesky", "api", "campaigns"],
   "style": "dark",
   "timezone": "browser",
   "refresh": "30s",
   "time": {
-    "from": "now-1h",
+    "from": "now-6h",
     "to": "now"
   },
   "panels": [
     {
       "id": 1,
+      "title": "Campaign Overview",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "id": 2,
+      "title": "Active Campaigns",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "active_campaigns_count",
+          "legendFormat": "Active Campaigns"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "displayMode": "basic" },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 }
+    },
+    {
+      "id": 3,
+      "title": "Daily Campaign Executions",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "increase(daily_campaign_executions_total[24h])",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "displayMode": "basic" },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 }
+    },
+    {
+      "id": 4,
+      "title": "Total Follows Today",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(increase(follow_attempts_total{status=\"success\"}[24h]))",
+          "legendFormat": "Successful Follows"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds", "fixedColor": "green" },
+          "custom": { "displayMode": "basic" },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 }
+    },
+    {
+      "id": 5,
+      "title": "Total Unfollows Today",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(increase(unfollow_attempts_total{status=\"success\"}[24h]))",
+          "legendFormat": "Successful Unfollows"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds", "fixedColor": "orange" },
+          "custom": { "displayMode": "basic" },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 }
+    },
+    {
+      "id": 6,
+      "title": "Follow/Unfollow Operations",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "collapsed": false
+    },
+    {
+      "id": 7,
+      "title": "Follow Success Rate",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "rate(follow_attempts_total{status=\"success\"}[5m]) / rate(follow_attempts_total[5m]) * 100",
+          "legendFormat": "Follow Success Rate %"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 }
+    },
+    {
+      "id": 8,
+      "title": "Unfollow Success Rate",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "rate(unfollow_attempts_total{status=\"success\"}[5m]) / rate(unfollow_attempts_total[5m]) * 100",
+          "legendFormat": "Unfollow Success Rate %"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 }
+    },
+    {
+      "id": 9,
+      "title": "Follow Attempts by Campaign",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "rate(follow_attempts_total[5m])",
+          "legendFormat": "Campaign {{campaign_id}} - {{status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "ops"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 }
+    },
+    {
+      "id": 10,
+      "title": "Follow Failure Reasons",
+      "type": "piechart",
+      "targets": [
+        {
+          "expr": "sum by (failure_reason) (increase(follow_attempts_total{status=\"failed\"}[1h]))",
+          "legendFormat": "{{failure_reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short",
+          "custom": { "displayLabels": ["name", "value"] }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 }
+    },
+    {
+      "id": 11,
+      "title": "Bluesky API Performance",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 },
+      "collapsed": false
+    },
+    {
+      "id": 12,
+      "title": "API Request Rate by Endpoint",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "rate(bluesky_api_requests_total[5m])",
+          "legendFormat": "{{endpoint}} ({{method}}) - {{status_code}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "reqps"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 }
+    },
+    {
+      "id": 13,
+      "title": "API Response Times",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(bluesky_api_request_duration_seconds_bucket[5m]))",
+          "legendFormat": "95th percentile"
+        },
+        {
+          "expr": "histogram_quantile(0.75, rate(bluesky_api_request_duration_seconds_bucket[5m]))",
+          "legendFormat": "75th percentile"
+        },
+        {
+          "expr": "histogram_quantile(0.50, rate(bluesky_api_request_duration_seconds_bucket[5m]))",
+          "legendFormat": "50th percentile (median)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 }
+    },
+    {
+      "id": 14,
+      "title": "API Errors by Status Code",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "rate(bluesky_api_requests_total{status_code!~\"2..\"}[5m])",
+          "legendFormat": "{{endpoint}} - HTTP {{status_code}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "reqps"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 31 }
+    },
+    {
+      "id": 15,
+      "title": "Authentication Failures",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "rate(authentication_failures_total[5m])",
+          "legendFormat": "{{failure_type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "failps"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 31 }
+    },
+    {
+      "id": 16,
+      "title": "System Health",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 39 },
+      "collapsed": false
+    },
+    {
+      "id": 17,
       "title": "HTTP Requests Rate",
       "type": "graph",
       "targets": [
         {
           "expr": "rate(http_requests_total[5m])",
-          "legendFormat": "{{method}} {{path}}"
+          "legendFormat": "{{method}} {{endpoint}}"
         }
       ],
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
-      "yAxes": [{ "label": "Requests/sec" }]
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "reqps"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 }
     },
     {
-      "id": 2,
-      "title": "Response Time",
+      "id": 18,
+      "title": "HTTP Response Times",
       "type": "graph",
       "targets": [
         {
@@ -37,33 +303,144 @@
           "legendFormat": "50th percentile"
         }
       ],
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-      "yAxes": [{ "label": "Seconds", "unit": "s" }]
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 }
     },
     {
-      "id": 3,
-      "title": "HTTP Status Codes",
+      "id": 19,
+      "title": "HTTP Status Codes Distribution",
       "type": "graph",
       "targets": [
         {
           "expr": "rate(http_requests_total[5m])",
-          "legendFormat": "{{status}}"
+          "legendFormat": "HTTP {{status}}"
         }
       ],
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
-      "yAxes": [{ "label": "Requests/sec" }]
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "reqps"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 48 }
     },
     {
-      "id": 4,
-      "title": "Active Workers",
+      "id": 20,
+      "title": "RQ Workers & Jobs",
       "type": "stat",
       "targets": [
         {
           "expr": "rq_workers_total",
-          "legendFormat": "Workers"
+          "legendFormat": "Active Workers"
+        },
+        {
+          "expr": "rate(rq_jobs_total[5m])",
+          "legendFormat": "Jobs/sec - {{status}}"
         }
       ],
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 }
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 48 }
+    },
+    {
+      "id": 21,
+      "title": "Campaign Performance Details",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 56 },
+      "collapsed": false
+    },
+    {
+      "id": 22,
+      "title": "Follow-back Detection Rate",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "rate(follow_backs_detected_total[5m])",
+          "legendFormat": "Follow-backs/min - Campaign {{campaign_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 57 }
+    },
+    {
+      "id": 23,
+      "title": "Followers Processed by Campaign",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "rate(followers_processed_total[5m])",
+          "legendFormat": "Campaign {{campaign_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 57 }
+    },
+    {
+      "id": 24,
+      "title": "Unfollow Failure Reasons",
+      "type": "piechart",
+      "targets": [
+        {
+          "expr": "sum by (failure_reason) (increase(unfollow_attempts_total{status=\"failed\"}[1h]))",
+          "legendFormat": "{{failure_reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short",
+          "custom": { "displayLabels": ["name", "value"] }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 65 }
+    },
+    {
+      "id": 25,
+      "title": "Campaign Success Metrics (24h)",
+      "type": "table",
+      "targets": [
+        {
+          "expr": "sum by (campaign_id) (increase(follow_attempts_total{status=\"success\"}[24h]))",
+          "legendFormat": "Follows",
+          "format": "table"
+        },
+        {
+          "expr": "sum by (campaign_id) (increase(unfollow_attempts_total{status=\"success\"}[24h]))",
+          "legendFormat": "Unfollows",
+          "format": "table"
+        },
+        {
+          "expr": "sum by (campaign_id) (increase(follow_backs_detected_total[24h]))",
+          "legendFormat": "Follow-backs",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 65 }
     }
   ]
 }
