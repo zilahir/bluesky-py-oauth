@@ -208,7 +208,18 @@ function CampaignDetailsPage({ params }: Route.ComponentProps): ReactElement {
                 )}
               </CardFooter>
             </Card>
-            <div className="space-y-3">
+            <Card>
+              <CardHeader>
+                <CardTitle>Accounts to follow</CardTitle>
+                <CardDescription>
+                  These are the followers you are targeting in this campaign.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <AccountsToFollowTable data={data.followers} />
+              </CardContent>
+            </Card>
+            <div className="hidden space-y-3">
               <h1 className="text-xl font-semibold text-foreground">
                 Accounts to follow
               </h1>

@@ -1,5 +1,5 @@
 import type { CampaignFollowers } from "~/types/Campaigns";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { ColumnDef, ColumnFiltersState } from "@tanstack/react-table";
 import { format } from "date-fns";
 import {
   Table,
@@ -16,11 +16,13 @@ import {
   getPaginationRowModel,
   type SortingState,
   getSortedRowModel,
+  getFilteredRowModel,
 } from "@tanstack/react-table";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { useState } from "react";
 import { ArrowUpDownIcon, CheckIcon } from "lucide-react";
+import { Input } from "../ui/input";
 
 type AccountToFollow = CampaignFollowers;
 
@@ -83,6 +85,7 @@ const columns: ColumnDef<AccountToFollow>[] = [
 
 function AccountsToFollowTable({ data }: IAccountsToFollowTable) {
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
 
   const table = useReactTable({
     data,
@@ -93,11 +96,30 @@ function AccountsToFollowTable({ data }: IAccountsToFollowTable) {
     getSortedRowModel: getSortedRowModel(),
     state: {
       sorting,
+      columnFilters,
     },
+    onColumnFiltersChange: setColumnFilters,
+    getFilteredRowModel: getFilteredRowModel(),
   });
 
   return (
     <div>
+      <div className="flex items-center justify-end py-4">
+        <Input
+          placeholder="Filter accounts..."
+          value={
+            (table.getColumn("account_handle")?.getFilterValue() as string) ||
+            ""
+          }
+          onChange={(event) =>
+            table
+              .getColumn("account_handle")
+              ?.setFilterValue(event.target.value)
+          }
+          className="max-w-sm"
+        />
+      </div>
+
       <div className="overflow-hidden rounded-md border">
         <Table>
           <TableHeader>
