@@ -16,8 +16,6 @@ import { Form, FormControl, FormField, FormItem, FormLabel } from "../ui/form";
 import apiClient from "~/utils/api";
 import { Loader2 } from "lucide-react";
 
-interface AuthError {}
-
 interface AuthResponse {
   message: string;
   redirect_url: string;

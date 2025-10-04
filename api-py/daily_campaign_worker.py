@@ -31,9 +31,6 @@ from metrics import (
     track_authentication_failure,
     update_active_campaigns_count,
 )
-from atproto_oauth import refresh_token_request
-from settings import get_settings
-from oauth_metadata import OauthMetadata
 from logger_config import campaign_logger, log_exception, log_campaign_event
 
 
@@ -285,8 +282,17 @@ class DailyCampaignWorker:
         remaining_follows = max(0, self.config.MAX_FOLLOWS_PER_DAY - today_follows)
 
         if remaining_follows == 0:
+            campaign_logger.info(
+                f"📊 Campaign {campaign_id}: No follow attempts made - Daily limit reached "
+                f"({today_follows}/{self.config.MAX_FOLLOWS_PER_DAY} follows already completed today on {today})"
+            )
             log_campaign_event(campaign_id, "Daily follow limit already reached")
             return 0
+
+        campaign_logger.info(
+            f"📊 Campaign {campaign_id}: Follow capacity available - "
+            f"{remaining_follows}/{self.config.MAX_FOLLOWS_PER_DAY} follows remaining for today ({today})"
+        )
 
         # Get accounts ready to follow
         accounts_to_follow = (
@@ -302,6 +308,18 @@ class DailyCampaignWorker:
             )
             .limit(remaining_follows)
             .all()
+        )
+
+        if not accounts_to_follow:
+            campaign_logger.info(
+                f"📊 Campaign {campaign_id}: No follow attempts made - No eligible accounts available "
+                f"(All accounts either already followed, unfollowed, or exceeded max attempts)"
+            )
+            log_campaign_event(campaign_id, "No eligible accounts available to follow")
+            return 0
+
+        campaign_logger.info(
+            f"📊 Campaign {campaign_id}: Attempting to follow {len(accounts_to_follow)} accounts"
         )
 
         follows_count = 0
@@ -498,84 +516,6 @@ class DailyCampaignWorker:
                 track_follow_attempt(campaign_id, True)
                 return True
             else:
-                # Check if this is a token expiry error and attempt refresh + retry
-                try:
-                    error_body = follow_resp.json()
-                    is_token_expired = (
-                        follow_resp.status_code == 400
-                        and error_body.get("error") == "invalid_token"
-                        and "exp" in error_body.get("message", "")
-                    )
-
-                    if is_token_expired:
-                        campaign_logger.warning(
-                            f"🔄 Token expired for {account_handle}, attempting refresh and retry"
-                        )
-                        track_authentication_failure("token_expired")
-
-                        # Attempt to refresh the token
-                        if self.refresh_oauth_token(oauth_session, db):
-                            campaign_logger.info(
-                                f"🔄 Token refreshed, retrying follow for {account_handle}"
-                            )
-
-                            # Retry the follow operation with refreshed token
-                            retry_start = time.time()
-                            retry_resp = pds_authed_req(
-                                "POST",
-                                create_record_url,
-                                access_token=oauth_session.access_token,
-                                dpop_private_jwk_json=oauth_session.dpop_private_jwk,
-                                user_did=oauth_session.did,
-                                db=db,
-                                dpop_pds_nonce=getattr(
-                                    oauth_session, "dpop_pds_nonce", ""
-                                )
-                                or "",
-                                body=create_record_payload,
-                            )
-                            retry_duration = time.time() - retry_start
-
-                            # Track the retry API request
-                            track_bluesky_api_request(
-                                "createRecord",
-                                "POST",
-                                retry_resp.status_code,
-                                retry_duration,
-                            )
-
-                            if retry_resp.status_code in [200, 201]:
-                                total_duration = time.time() - start_time
-                                campaign_logger.info(
-                                    f"✅ Successfully followed {account_handle} after token refresh in {total_duration:.2f}s (Campaign: {campaign_id})"
-                                )
-                                track_follow_attempt(campaign_id, True)
-                                return True
-                            else:
-                                campaign_logger.error(
-                                    f"❌ Follow retry failed for {account_handle} even after token refresh"
-                                )
-                                try:
-                                    retry_error_body = retry_resp.json()
-                                    campaign_logger.error(
-                                        f"Retry error details: {retry_error_body}"
-                                    )
-                                except:
-                                    campaign_logger.error(
-                                        f"Retry error body: {retry_resp.text[:200]}"
-                                    )
-                        else:
-                            campaign_logger.error(
-                                f"❌ Token refresh failed for {account_handle}"
-                            )
-                            track_authentication_failure("token_refresh_failed")
-
-                except Exception as parse_error:
-                    campaign_logger.error(
-                        f"Error parsing follow response: {parse_error}"
-                    )
-
-                # Original failure handling (for non-token errors or after failed refresh)
                 failure_reason = self._categorize_follow_failure(
                     follow_resp.status_code, follow_resp
                 )
@@ -663,61 +603,6 @@ class DailyCampaignWorker:
             return "auth_error"
         else:
             return "unknown_exception"
-
-    def refresh_oauth_token(self, oauth_session, db: Session) -> bool:
-        """Refresh OAuth token for a campaign user"""
-        try:
-            campaign_logger.info(
-                f"🔄 Attempting to refresh OAuth token for user: {oauth_session.did}"
-            )
-
-            # Get settings for client_secret_jwk
-            settings = get_settings()
-
-            # Create user dict in the format expected by refresh_token_request
-            user_dict = {
-                "authserver_iss": oauth_session.authserver_iss,
-                "refresh_token": oauth_session.refresh_token,
-                "dpop_private_jwk": oauth_session.dpop_private_jwk,
-                "dpop_authserver_nonce": oauth_session.dpop_authserver_nonce,
-            }
-
-            campaign_logger.debug(f"🔍 User dict for token refresh: {user_dict}")
-
-            # Get the correct app URL from OAuth metadata
-            oauth_config = OauthMetadata(
-                "development"
-            )  # TODO: Get environment from config
-            app_url = oauth_config.ORIGIN
-
-            # Request new tokens
-            tokens, dpop_authserver_nonce = refresh_token_request(
-                user_dict, app_url, settings.client_secret_jwk_obj
-            )
-
-            # Update the OAuth session with new tokens
-            oauth_session.access_token = tokens["access_token"]
-            oauth_session.refresh_token = tokens["refresh_token"]
-            oauth_session.dpop_authserver_nonce = dpop_authserver_nonce
-            oauth_session.updated_at = datetime.utcnow()
-
-            db.commit()
-
-            campaign_logger.info(
-                f"✅ Successfully refreshed OAuth token for user: {oauth_session.did}"
-            )
-            return True
-
-        except Exception as e:
-            campaign_logger.error(
-                f"❌ Failed to refresh OAuth token for user {oauth_session.did}: {e}"
-            )
-            log_exception(
-                campaign_logger, f"Token refresh error for {oauth_session.did}", e
-            )
-            track_authentication_failure("token_refresh_failed")
-            db.rollback()
-            return False
 
     def unfollow_account(
         self, follower_record: FollowersToGet, oauth_session, db: Session
@@ -912,84 +797,6 @@ class DailyCampaignWorker:
                 track_unfollow_attempt(campaign_id, True)
                 return True
             else:
-                # Check if this is a token expiry error and attempt refresh + retry
-                try:
-                    error_data = delete_resp.json()
-                    is_token_expired = (
-                        delete_resp.status_code == 400
-                        and error_data.get("error") == "invalid_token"
-                        and "exp" in error_data.get("message", "")
-                    )
-
-                    if is_token_expired:
-                        campaign_logger.warning(
-                            f"🔄 Token expired during unfollow for {account_handle}, attempting refresh and retry"
-                        )
-                        track_authentication_failure("token_expired")
-
-                        # Attempt to refresh the token
-                        if self.refresh_oauth_token(oauth_session, db):
-                            campaign_logger.info(
-                                f"🔄 Token refreshed, retrying unfollow for {account_handle}"
-                            )
-
-                            # Retry the delete operation with refreshed token
-                            retry_start = time.time()
-                            retry_resp = pds_authed_req(
-                                "POST",
-                                delete_record_url,
-                                access_token=oauth_session.access_token,
-                                dpop_private_jwk_json=oauth_session.dpop_private_jwk,
-                                user_did=oauth_session.did,
-                                db=db,
-                                dpop_pds_nonce=getattr(
-                                    oauth_session, "dpop_pds_nonce", ""
-                                )
-                                or "",
-                                body=delete_record_payload,
-                            )
-                            retry_duration = time.time() - retry_start
-
-                            # Track the retry API request
-                            track_bluesky_api_request(
-                                "deleteRecord",
-                                "POST",
-                                retry_resp.status_code,
-                                retry_duration,
-                            )
-
-                            if retry_resp.status_code in [200, 201]:
-                                total_duration = time.time() - start_time
-                                campaign_logger.info(
-                                    f"✅ Successfully unfollowed {account_handle} after token refresh in {total_duration:.2f}s (Campaign: {campaign_id})"
-                                )
-                                track_unfollow_attempt(campaign_id, True)
-                                return True
-                            else:
-                                campaign_logger.error(
-                                    f"❌ Unfollow retry failed for {account_handle} even after token refresh"
-                                )
-                                try:
-                                    retry_error_data = retry_resp.json()
-                                    campaign_logger.error(
-                                        f"Retry error details: {retry_error_data}"
-                                    )
-                                except:
-                                    campaign_logger.error(
-                                        f"Retry error body: {retry_resp.text[:200]}"
-                                    )
-                        else:
-                            campaign_logger.error(
-                                f"❌ Token refresh failed during unfollow for {account_handle}"
-                            )
-                            track_authentication_failure("token_refresh_failed")
-
-                except Exception as parse_error:
-                    campaign_logger.error(
-                        f"Error parsing unfollow response: {parse_error}"
-                    )
-
-                # Original failure handling (for non-token errors or after failed refresh)
                 failure_reason = self._categorize_unfollow_failure(
                     delete_resp.status_code, delete_resp
                 )

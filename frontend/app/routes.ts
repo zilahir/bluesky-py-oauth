@@ -19,6 +19,8 @@ export default [
       route("/logout", "routes/LogOut/index.tsx"),
       route("account", "./routes/Account/index.tsx"),
 
+      ...prefix("post", [route("/new", "./routes/NewPost/index.tsx")]),
+
       ...prefix("campaigns", [
         index("./routes/Campaigns/index.tsx"),
         route("/new", "./routes/NewCampaign/index.tsx"),
