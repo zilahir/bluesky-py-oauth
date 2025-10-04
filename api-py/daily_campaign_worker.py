@@ -23,7 +23,14 @@ from routes.utils.postgres_connection import (
 from campaign_config import CampaignConfig, CampaignMetrics, CAMPAIGN_EXECUTION_STATES
 from atproto_oauth import pds_authed_req
 from requests import request as req
-from metrics import track_rq_job
+from metrics import (
+    track_rq_job,
+    track_follow_attempt,
+    track_unfollow_attempt,
+    track_bluesky_api_request,
+    track_authentication_failure,
+    update_active_campaigns_count,
+)
 from logger_config import campaign_logger, log_exception, log_campaign_event
 
 
@@ -70,6 +77,9 @@ class DailyCampaignWorker:
                 campaign_logger.info(
                     f"Found {len(active_campaigns)} active campaigns to process"
                 )
+
+                # Update Prometheus metric with current active campaign count
+                update_active_campaigns_count(len(active_campaigns))
 
                 if self.config.DEBUG_MODE:
                     for campaign in active_campaigns:
@@ -272,8 +282,17 @@ class DailyCampaignWorker:
         remaining_follows = max(0, self.config.MAX_FOLLOWS_PER_DAY - today_follows)
 
         if remaining_follows == 0:
+            campaign_logger.info(
+                f"📊 Campaign {campaign_id}: No follow attempts made - Daily limit reached "
+                f"({today_follows}/{self.config.MAX_FOLLOWS_PER_DAY} follows already completed today on {today})"
+            )
             log_campaign_event(campaign_id, "Daily follow limit already reached")
             return 0
+
+        campaign_logger.info(
+            f"📊 Campaign {campaign_id}: Follow capacity available - "
+            f"{remaining_follows}/{self.config.MAX_FOLLOWS_PER_DAY} follows remaining for today ({today})"
+        )
 
         # Get accounts ready to follow
         accounts_to_follow = (
@@ -291,6 +310,18 @@ class DailyCampaignWorker:
             .all()
         )
 
+        if not accounts_to_follow:
+            campaign_logger.info(
+                f"📊 Campaign {campaign_id}: No follow attempts made - No eligible accounts available "
+                f"(All accounts either already followed, unfollowed, or exceeded max attempts)"
+            )
+            log_campaign_event(campaign_id, "No eligible accounts available to follow")
+            return 0
+
+        campaign_logger.info(
+            f"📊 Campaign {campaign_id}: Attempting to follow {len(accounts_to_follow)} accounts"
+        )
+
         follows_count = 0
 
         for account in accounts_to_follow:
@@ -300,8 +331,6 @@ class DailyCampaignWorker:
                     follows_count += 1
                     account.me_following = datetime.utcnow()
                     account.status = CAMPAIGN_EXECUTION_STATES["WAITING_FOR_FOLLOWBACK"]
-
-                account.follow_attempt_count += 1
 
                 # Rate limiting
                 time.sleep(self.config.REQUEST_DELAY_SECONDS)
@@ -378,24 +407,67 @@ class DailyCampaignWorker:
     def follow_account(
         self, follower_record: FollowersToGet, oauth_session, db: Session
     ) -> bool:
-        """Follow a specific account"""
+        """Follow a specific account with detailed logging and metrics"""
+        campaign_id = str(follower_record.campaign_id)
+        account_handle = follower_record.account_handle
+
+        start_time = time.time()
+
         try:
+            campaign_logger.info(
+                f"🎯 Attempting to follow {account_handle} (Campaign: {campaign_id})"
+            )
+
             # Get the target account's DID
-            profile_url = f"https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor={follower_record.account_handle}"
+            profile_url = f"https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor={account_handle}"
+
+            profile_start = time.time()
             profile_resp = req("GET", profile_url, timeout=30)
+            profile_duration = time.time() - profile_start
+
+            # Track API request
+            track_bluesky_api_request(
+                "getProfile", "GET", profile_resp.status_code, profile_duration
+            )
 
             if profile_resp.status_code not in [200, 201]:
-                campaign_logger.warning(
-                    f"Failed to get profile for {follower_record.account_handle}"
+                failure_reason = "profile_api_error"
+                campaign_logger.error(
+                    f"❌ Failed to get profile for {account_handle}: HTTP {profile_resp.status_code}"
                 )
+
+                # Log response details for debugging
+                try:
+                    error_body = profile_resp.json()
+                    campaign_logger.error(f"Profile API error details: {error_body}")
+                except:
+                    campaign_logger.error(
+                        f"Profile API error body: {profile_resp.text[:200]}"
+                    )
+
+                track_follow_attempt(campaign_id, False, failure_reason)
                 return False
 
-            target_did = profile_resp.json().get("did")
-            if not target_did:
-                campaign_logger.warning(
-                    f"No DID found for {follower_record.account_handle}"
+            try:
+                profile_data = profile_resp.json()
+                target_did = profile_data.get("did")
+            except Exception as e:
+                failure_reason = "profile_parse_error"
+                campaign_logger.error(
+                    f"❌ Failed to parse profile response for {account_handle}: {e}"
                 )
+                track_follow_attempt(campaign_id, False, failure_reason)
                 return False
+
+            if not target_did:
+                failure_reason = "no_did_found"
+                campaign_logger.error(
+                    f"❌ No DID found in profile for {account_handle}"
+                )
+                track_follow_attempt(campaign_id, False, failure_reason)
+                return False
+
+            campaign_logger.debug(f"📍 Found DID for {account_handle}: {target_did}")
 
             # Create follow record
             follow_payload = {
@@ -413,6 +485,11 @@ class DailyCampaignWorker:
                 "record": follow_payload,
             }
 
+            campaign_logger.debug(
+                f"🔄 Creating follow record for {account_handle} at {create_record_url}"
+            )
+
+            follow_start = time.time()
             follow_resp = pds_authed_req(
                 "POST",
                 create_record_url,
@@ -423,51 +500,173 @@ class DailyCampaignWorker:
                 dpop_pds_nonce=getattr(oauth_session, "dpop_pds_nonce", "") or "",
                 body=create_record_payload,
             )
+            follow_duration = time.time() - follow_start
+
+            # Track API request
+            track_bluesky_api_request(
+                "createRecord", "POST", follow_resp.status_code, follow_duration
+            )
+
+            total_duration = time.time() - start_time
 
             if follow_resp.status_code in [200, 201]:
                 campaign_logger.info(
-                    f"✓ Successfully followed {follower_record.account_handle}"
+                    f"✅ Successfully followed {account_handle} in {total_duration:.2f}s (Campaign: {campaign_id})"
                 )
+                track_follow_attempt(campaign_id, True)
                 return True
             else:
-                campaign_logger.warning(
-                    f"✗ Failed to follow {follower_record.account_handle}: HTTP {follow_resp.status_code}"
+                failure_reason = self._categorize_follow_failure(
+                    follow_resp.status_code, follow_resp
                 )
+                campaign_logger.error(
+                    f"❌ Failed to follow {account_handle}: HTTP {follow_resp.status_code} in {total_duration:.2f}s (Campaign: {campaign_id})"
+                )
+
+                # Log detailed error information
+                try:
+                    error_body = follow_resp.json()
+                    campaign_logger.error(f"Follow API error details: {error_body}")
+                    if "message" in error_body:
+                        campaign_logger.error(f"Error message: {error_body['message']}")
+                except:
+                    campaign_logger.error(
+                        f"Follow API error body: {follow_resp.text[:200]}"
+                    )
+
+                track_follow_attempt(campaign_id, False, failure_reason)
                 return False
 
         except Exception as e:
+            total_duration = time.time() - start_time
+            failure_reason = self._categorize_exception(e)
+
+            campaign_logger.error(
+                f"💥 Exception during follow attempt for {account_handle}: {type(e).__name__} in {total_duration:.2f}s (Campaign: {campaign_id})"
+            )
+
             log_exception(
                 campaign_logger,
-                f"Error in follow_account for {follower_record.account_handle}",
+                f"Follow exception details for {account_handle}",
                 e,
             )
+
+            track_follow_attempt(campaign_id, False, failure_reason)
             return False
+
+    def _categorize_follow_failure(self, status_code: int, response) -> str:
+        """Categorize follow failure based on HTTP status code and response"""
+        if status_code == 400:
+            return "bad_request"
+        elif status_code == 401:
+            return "unauthorized"
+        elif status_code == 403:
+            return "forbidden"
+        elif status_code == 404:
+            return "not_found"
+        elif status_code == 429:
+            return "rate_limited"
+        elif status_code >= 500:
+            return "server_error"
+        else:
+            return "api_error"
+
+    def _categorize_unfollow_failure(self, status_code: int, response) -> str:
+        """Categorize unfollow failure based on HTTP status code and response"""
+        if status_code == 400:
+            return "bad_request"
+        elif status_code == 401:
+            return "unauthorized"
+        elif status_code == 403:
+            return "forbidden"
+        elif status_code == 404:
+            return "record_not_found"
+        elif status_code == 429:
+            return "rate_limited"
+        elif status_code >= 500:
+            return "server_error"
+        else:
+            return "api_error"
+
+    def _categorize_exception(self, exception: Exception) -> str:
+        """Categorize exceptions into failure types"""
+        exception_type = type(exception).__name__
+        exception_str = str(exception).lower()
+
+        if "timeout" in exception_str or "timed out" in exception_str:
+            return "timeout"
+        elif "connection" in exception_str or "network" in exception_str:
+            return "network_error"
+        elif "json" in exception_str or "decode" in exception_str:
+            return "parse_error"
+        elif "auth" in exception_str or "token" in exception_str:
+            return "auth_error"
+        else:
+            return "unknown_exception"
 
     def unfollow_account(
         self, follower_record: FollowersToGet, oauth_session, db: Session
     ) -> bool:
-        """Unfollow a specific account by deleting the follow record"""
+        """Unfollow a specific account by deleting the follow record with detailed logging"""
+        campaign_id = str(follower_record.campaign_id)
+        account_handle = follower_record.account_handle
+
+        start_time = time.time()
+
         try:
             campaign_logger.info(
-                f"Attempting to unfollow {follower_record.account_handle}"
+                f"🎯 Attempting to unfollow {account_handle} (Campaign: {campaign_id})"
             )
 
             # Step 1: Get the target account's DID
-            profile_url = f"https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor={follower_record.account_handle}"
+            profile_url = f"https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor={account_handle}"
+
+            profile_start = time.time()
             profile_resp = req("GET", profile_url, timeout=30)
+            profile_duration = time.time() - profile_start
+
+            # Track API request
+            track_bluesky_api_request(
+                "getProfile", "GET", profile_resp.status_code, profile_duration
+            )
 
             if profile_resp.status_code not in [200, 201]:
-                campaign_logger.warning(
-                    f"Failed to get profile for {follower_record.account_handle}"
+                failure_reason = "profile_api_error"
+                campaign_logger.error(
+                    f"❌ Failed to get profile for {account_handle}: HTTP {profile_resp.status_code}"
                 )
+
+                try:
+                    error_body = profile_resp.json()
+                    campaign_logger.error(f"Profile API error details: {error_body}")
+                except:
+                    campaign_logger.error(
+                        f"Profile API error body: {profile_resp.text[:200]}"
+                    )
+
+                track_unfollow_attempt(campaign_id, False, failure_reason)
                 return False
 
-            target_did = profile_resp.json().get("did")
-            if not target_did:
-                campaign_logger.warning(
-                    f"No DID found for {follower_record.account_handle}"
+            try:
+                profile_data = profile_resp.json()
+                target_did = profile_data.get("did")
+            except Exception as e:
+                failure_reason = "profile_parse_error"
+                campaign_logger.error(
+                    f"❌ Failed to parse profile response for {account_handle}: {e}"
                 )
+                track_unfollow_attempt(campaign_id, False, failure_reason)
                 return False
+
+            if not target_did:
+                failure_reason = "no_did_found"
+                campaign_logger.error(
+                    f"❌ No DID found in profile for {account_handle}"
+                )
+                track_unfollow_attempt(campaign_id, False, failure_reason)
+                return False
+
+            campaign_logger.debug(f"📍 Found DID for {account_handle}: {target_did}")
 
             # Step 2: Find our follow records to locate the specific one for this account
             # Construct URL with query parameters for GET request
@@ -483,6 +682,11 @@ class DailyCampaignWorker:
             query_string = urlencode(list_records_params)
             list_records_url = f"{oauth_session.pds_url}/xrpc/com.atproto.repo.listRecords?{query_string}"
 
+            campaign_logger.debug(
+                f"🔄 Listing follow records for {account_handle} at {list_records_url}"
+            )
+
+            list_start = time.time()
             list_resp = pds_authed_req(
                 "GET",
                 list_records_url,
@@ -492,28 +696,62 @@ class DailyCampaignWorker:
                 db=db,
                 dpop_pds_nonce=getattr(oauth_session, "dpop_pds_nonce", "") or "",
             )
+            list_duration = time.time() - list_start
+
+            # Track API request
+            track_bluesky_api_request(
+                "listRecords", "GET", list_resp.status_code, list_duration
+            )
 
             if list_resp.status_code not in [200, 201]:
+                failure_reason = "list_records_api_error"
                 campaign_logger.error(
-                    f"Failed to list follow records: HTTP {list_resp.status_code}"
+                    f"❌ Failed to list follow records for {account_handle}: HTTP {list_resp.status_code}"
                 )
+
+                try:
+                    error_body = list_resp.json()
+                    campaign_logger.error(f"List records error details: {error_body}")
+                except:
+                    campaign_logger.error(
+                        f"List records error body: {list_resp.text[:200]}"
+                    )
+
+                track_unfollow_attempt(campaign_id, False, failure_reason)
                 return False
 
             # Step 3: Find the specific follow record for this account
+            try:
+                follow_records_data = list_resp.json()
+                follow_records = follow_records_data.get("records", [])
+            except Exception as e:
+                failure_reason = "list_records_parse_error"
+                campaign_logger.error(
+                    f"❌ Failed to parse list records response for {account_handle}: {e}"
+                )
+                track_unfollow_attempt(campaign_id, False, failure_reason)
+                return False
+
             follow_record_uri = None
-            follow_records = list_resp.json().get("records", [])
+            campaign_logger.debug(
+                f"🔍 Searching through {len(follow_records)} follow records for {account_handle}"
+            )
 
             for record in follow_records:
                 if record.get("value", {}).get("subject") == target_did:
                     follow_record_uri = record.get("uri")
+                    campaign_logger.debug(
+                        f"📎 Found follow record URI: {follow_record_uri}"
+                    )
                     break
 
             if not follow_record_uri:
-                campaign_logger.warning(
-                    f"No follow record found for {follower_record.account_handle} ({target_did})"
+                campaign_logger.info(
+                    f"🤷 No follow record found for {account_handle} ({target_did}) - Already unfollowed or never followed"
                 )
                 # This might happen if we already unfollowed or there was an error
                 # Consider this a success since the goal (not following) is achieved
+                track_unfollow_attempt(campaign_id, True, "already_unfollowed")
                 return True
 
             # Step 4: Delete the follow record to unfollow
@@ -530,8 +768,9 @@ class DailyCampaignWorker:
                 "rkey": rkey,
             }
 
-            campaign_logger.debug(f"Deleting follow record: {follow_record_uri}")
+            campaign_logger.debug(f"🗑️ Deleting follow record: {follow_record_uri}")
 
+            delete_start = time.time()
             delete_resp = pds_authed_req(
                 "POST",
                 delete_record_url,
@@ -542,29 +781,58 @@ class DailyCampaignWorker:
                 dpop_pds_nonce=getattr(oauth_session, "dpop_pds_nonce", "") or "",
                 body=delete_record_payload,
             )
+            delete_duration = time.time() - delete_start
+
+            # Track API request
+            track_bluesky_api_request(
+                "deleteRecord", "POST", delete_resp.status_code, delete_duration
+            )
+
+            total_duration = time.time() - start_time
 
             if delete_resp.status_code in [200, 201]:
                 campaign_logger.info(
-                    f"✓ Successfully unfollowed {follower_record.account_handle}"
+                    f"✅ Successfully unfollowed {account_handle} in {total_duration:.2f}s (Campaign: {campaign_id})"
                 )
+                track_unfollow_attempt(campaign_id, True)
                 return True
             else:
-                campaign_logger.warning(
-                    f"✗ Failed to unfollow {follower_record.account_handle}: HTTP {delete_resp.status_code}"
+                failure_reason = self._categorize_unfollow_failure(
+                    delete_resp.status_code, delete_resp
                 )
+                campaign_logger.error(
+                    f"❌ Failed to unfollow {account_handle}: HTTP {delete_resp.status_code} in {total_duration:.2f}s (Campaign: {campaign_id})"
+                )
+
+                # Log detailed error information
                 try:
                     error_data = delete_resp.json()
-                    campaign_logger.error(f"Error details: {error_data}")
+                    campaign_logger.error(f"Delete record error details: {error_data}")
+                    if "message" in error_data:
+                        campaign_logger.error(f"Error message: {error_data['message']}")
                 except:
-                    campaign_logger.error(f"Error response: {delete_resp.text[:200]}")
+                    campaign_logger.error(
+                        f"Delete record error body: {delete_resp.text[:200]}"
+                    )
+
+                track_unfollow_attempt(campaign_id, False, failure_reason)
                 return False
 
         except Exception as e:
+            total_duration = time.time() - start_time
+            failure_reason = self._categorize_exception(e)
+
+            campaign_logger.error(
+                f"💥 Exception during unfollow attempt for {account_handle}: {type(e).__name__} in {total_duration:.2f}s (Campaign: {campaign_id})"
+            )
+
             log_exception(
                 campaign_logger,
-                f"Error in unfollow_account for {follower_record.account_handle}",
+                f"Unfollow exception details for {account_handle}",
                 e,
             )
+
+            track_unfollow_attempt(campaign_id, False, failure_reason)
             return False
 
     def check_if_following_back(

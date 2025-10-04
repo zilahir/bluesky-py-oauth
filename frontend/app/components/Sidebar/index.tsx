@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import { Outlet } from "react-router";
+import { Link, Outlet, useMatches } from "react-router";
 import { AppSidebar } from "~/components/app-sidebar";
 import {
   Breadcrumb,
@@ -17,6 +17,36 @@ import {
 } from "~/components/ui/sidebar";
 
 function Sidebar(): ReactElement {
+  const matches = useMatches();
+
+  function getBreadcrumbTarget(match: any) {
+    const matchId = typeof match === "string" ? match : match.id;
+
+    if (matchId === "root") {
+      return "Home";
+    }
+    if (matchId === "routes/Dashboard/index") {
+      return "Dashboard";
+    }
+    if (matchId === "routes/Campaigns/index") {
+      return "Campaigns";
+    }
+    if (matchId === "routes/Campaigns/Details/index") {
+      const thisMatch = matches.find(({ id }) => id === matchId);
+      if (thisMatch && thisMatch.loaderData && thisMatch.loaderData.campaign) {
+        return thisMatch.loaderData.campaign.name;
+      }
+      return "Campaign Details";
+    }
+    if (matchId === "routes/NewCampaign/index") {
+      return "New Campaign";
+    }
+    if (matchId === "routes/Account/index") {
+      return "Account";
+    }
+
+    return matchId;
+  }
   return (
     <SidebarProvider>
       <AppSidebar />
@@ -30,15 +60,34 @@ function Sidebar(): ReactElement {
             />
             <Breadcrumb>
               <BreadcrumbList>
-                <BreadcrumbItem className="hidden md:block">
-                  <BreadcrumbLink href="#">
-                    Building Your Application
-                  </BreadcrumbLink>
-                </BreadcrumbItem>
-                <BreadcrumbSeparator className="hidden md:block" />
-                <BreadcrumbItem>
-                  <BreadcrumbPage>Data Fetching</BreadcrumbPage>
-                </BreadcrumbItem>
+                {matches
+                  .filter(
+                    (match) =>
+                      !match.id.includes("layouts/Auth") &&
+                      match.id !== "routes/Dashboard/Home/index" &&
+                      match.id !== "root" &&
+                      match.id !== "routes/home",
+                  )
+                  .map((match, index, filteredMatches) => (
+                    <div key={match.id} className="flex items-center">
+                      <BreadcrumbItem className="hidden md:block">
+                        {index === filteredMatches.length - 1 ? (
+                          <BreadcrumbPage className="capitalize">
+                            {getBreadcrumbTarget(match)}
+                          </BreadcrumbPage>
+                        ) : (
+                          <BreadcrumbLink asChild>
+                            <Link to={match.pathname || "/"}>
+                              {getBreadcrumbTarget(match)}
+                            </Link>
+                          </BreadcrumbLink>
+                        )}
+                      </BreadcrumbItem>
+                      {index < filteredMatches.length - 1 && (
+                        <BreadcrumbSeparator className="hidden md:block" />
+                      )}
+                    </div>
+                  ))}
               </BreadcrumbList>
             </Breadcrumb>
           </div>

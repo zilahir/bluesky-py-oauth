@@ -1,13 +1,14 @@
+import type { ReactElement } from "react";
 import type { Route } from "../+types/root";
 
 export function meta({}: Route.MetaArgs) {
   return [
-    { title: "New React Router App" },
-    { name: "description", content: "Welcome to React Router!" },
+    { title: "Dashboard" },
+    { name: "description", content: "Dashboard" },
   ];
 }
 
-export default function Home() {
+export default function Home(): ReactElement {
   return (
     <div>
       <p>Placeholder for home</p>

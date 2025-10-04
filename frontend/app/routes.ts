@@ -14,14 +14,18 @@ export default [
   ]),
 
   layout("./layouts/Auth/index.tsx", [
-    index("./routes/Dashboard/index.tsx"),
-    route("/logout", "routes/LogOut/index.tsx"),
-    route("account", "./routes/Account/index.tsx"),
+    route("/", "./routes/Dashboard/index.tsx", [
+      index("./routes/home.tsx"),
+      route("/logout", "routes/LogOut/index.tsx"),
+      route("account", "./routes/Account/index.tsx"),
 
-    ...prefix("/campaigns", [
-      index("./routes/Campaigns/index.tsx"),
-      route("/new", "./routes/NewCampaign/index.tsx"),
-      route("/:id", "./routes/Campaigns/Details/index.tsx"),
+      ...prefix("post", [route("/new", "./routes/NewPost/index.tsx")]),
+
+      ...prefix("campaigns", [
+        index("./routes/Campaigns/index.tsx"),
+        route("/new", "./routes/NewCampaign/index.tsx"),
+        route("/:id", "./routes/Campaigns/Details/index.tsx"),
+      ]),
     ]),
   ]),
 ] satisfies RouteConfig;

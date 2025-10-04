@@ -383,13 +383,15 @@ def pds_authed_req(
                 json=body if method.upper() != "GET" else None,
             )
 
-        # If we got a new server-provided DPoP nonce, store it in database and retry.
+        # Handle authentication errors - both DPoP nonce and token expiry
         if resp.status_code in [400, 401]:
             oauth_logger.error(
                 f"PDS HTTP Error {resp.status_code} for {method} {url}: {resp.text}, body={body}"
             )
             try:
                 error_data = resp.json()
+
+                # Handle DPoP nonce error
                 if error_data.get("error") == "use_dpop_nonce":
                     oauth_logger.info(f"DPoP nonce error: {error_data}")
                     dpop_pds_nonce = resp.headers["DPoP-Nonce"]
@@ -399,6 +401,9 @@ def pds_authed_req(
 
                     # Update PostgreSQL database using SQLAlchemy
                     try:
+                        oauth_logger.info(
+                            f"Updating DPoP nonce for user DID {user_did} in database"
+                        )
                         # Import here to avoid circular imports
                         from routes.utils.postgres_connection import OAuthSession
 
@@ -414,10 +419,85 @@ def pds_authed_req(
 
                         continue
                     except Exception as db_error:
-                        print(f"Error updating DPoP nonce in database: {db_error}")
+                        oauth_logger.error(
+                            f"Error updating DPoP nonce in database: {db_error}"
+                        )
                         # Continue anyway, might still work
                         continue
-            except (ValueError, KeyError):
+
+                # Handle token expiry error
+                elif error_data.get(
+                    "error"
+                ) == "invalid_token" and "exp" in error_data.get("message", ""):
+                    oauth_logger.warning(
+                        f"Token expired for user {user_did}, attempting refresh"
+                    )
+
+                    try:
+                        # Import here to avoid circular imports
+                        from routes.utils.postgres_connection import OAuthSession
+                        from settings import get_settings
+                        from oauth_metadata import OauthMetadata
+
+                        # Get OAuth session from database
+                        oauth_session = (
+                            db.query(OAuthSession)
+                            .filter(OAuthSession.did == user_did)
+                            .first()
+                        )
+
+                        if not oauth_session:
+                            oauth_logger.error(
+                                f"No OAuth session found for user {user_did}"
+                            )
+                            break
+
+                        # Get settings and OAuth metadata
+                        settings = get_settings()
+                        oauth_config = OauthMetadata(
+                            "development"
+                        )  # TODO: Get environment from config
+                        app_url = oauth_config.ORIGIN
+
+                        # Create user dict for refresh request
+                        user_dict = {
+                            "authserver_iss": oauth_session.authserver_iss,
+                            "refresh_token": oauth_session.refresh_token,
+                            "dpop_private_jwk": oauth_session.dpop_private_jwk,
+                            "dpop_authserver_nonce": oauth_session.dpop_authserver_nonce,
+                        }
+
+                        # Refresh the token
+                        oauth_logger.info(f"Refreshing token for user {user_did}")
+                        new_tokens, new_dpop_authserver_nonce = refresh_token_request(
+                            user_dict, app_url, settings.client_secret_jwk_obj
+                        )
+
+                        # Update the session with new tokens
+                        oauth_session.access_token = new_tokens["access_token"]
+                        oauth_session.refresh_token = new_tokens["refresh_token"]
+                        oauth_session.dpop_authserver_nonce = new_dpop_authserver_nonce
+                        from datetime import datetime
+
+                        oauth_session.updated_at = datetime.utcnow()
+                        db.commit()
+
+                        # Update the access_token for retry
+                        access_token = new_tokens["access_token"]
+                        oauth_logger.info(
+                            f"✅ Successfully refreshed token for user {user_did}, retrying request"
+                        )
+                        continue
+
+                    except Exception as refresh_error:
+                        oauth_logger.error(
+                            f"❌ Failed to refresh token for user {user_did}: {refresh_error}"
+                        )
+                        # Don't continue, let the original error response be returned
+                        break
+
+            except (ValueError, KeyError) as parse_error:
+                oauth_logger.error(f"Error parsing error response: {parse_error}")
                 # Response is not JSON or doesn't have expected structure
                 pass
 

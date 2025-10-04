@@ -16,6 +16,22 @@ from queue_config import get_queue
 from tasks import process_campaign_task
 from scheduler_utils import remove_campaign_jobs
 from logger_config import api_logger, log_exception
+from metrics import update_active_campaigns_count
+
+
+def get_active_campaign_count(db: Session) -> int:
+    """Get current count of active campaigns from database"""
+    from sqlalchemy import and_
+    return (
+        db.query(Campaign)
+        .filter(
+            and_(
+                Campaign.is_setup_job_running == False,
+                Campaign.deleted_at.is_(None),
+            )
+        )
+        .count()
+    )
 
 
 router = APIRouter(prefix="/api", include_in_schema=False)
@@ -159,6 +175,9 @@ async def delete_campaign(
         db.delete(campaign)
         db.commit()
 
+        # Update active campaigns metric after deletion
+        update_active_campaigns_count(get_active_campaign_count(db))
+
         return {
             "message": "Campaign deleted successfully",
         }
@@ -210,6 +229,10 @@ async def new_campaign(
         # Enqueue the campaign processing task
         queue = get_queue("campaign_get_all_followers")
         job = queue.enqueue(process_campaign_task, body)
+
+        # Update active campaigns metric (campaign is created but not yet active until setup completes)
+        # We don't increment here since is_setup_job_running=True means it's not active yet
+        update_active_campaigns_count(get_active_campaign_count(db))
 
         return {
             "message": "Campaign created successfully",

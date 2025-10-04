@@ -25,20 +25,9 @@ import {
 import ConfirmDeleteCampaignDialog from "~/components/ConfirmDeletCampaignDialog";
 import useCampaignStats from "~/hooks/useCampaignStats";
 import { Progress } from "~/components/ui/progress";
-import { format, intervalToDuration } from "date-fns";
+import { format, formatRelative, intervalToDuration } from "date-fns";
 
-interface ClientLoaderData {
-  campaign: {
-    name: string;
-    id: string;
-    is_campaign_running: boolean;
-    is_setup_job_running: boolean;
-  };
-}
-
-export async function clientLoader({
-  params,
-}: Route.LoaderArgs): Promise<ClientLoaderData> {
+export async function clientLoader({ params }: Route.LoaderArgs) {
   const { id } = params;
 
   const campaign = await getCampaign(id);
@@ -258,7 +247,7 @@ export function meta({ data: metaRouteData }: Route.MetaArgs) {
     return [
       {
         title: `Campaign - ${campaignNameCapitalized}`,
-        description: `Details of the campaign ${campaignNameCapitalized}`,
+        description: `Details of the campaign ${campaign.name}`,
       },
     ];
   }
@@ -270,5 +259,9 @@ export function meta({ data: metaRouteData }: Route.MetaArgs) {
     },
   ];
 }
+
+export const handle = {
+  demo: true,
+};
 
 export default CampaignDetailsPage;
