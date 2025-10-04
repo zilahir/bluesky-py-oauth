@@ -17,7 +17,8 @@ import {
   FormItem,
   FormLabel,
 } from "~/components/ui/form";
-import { Input } from "~/components/ui/input";
+import { Textarea } from "~/components/ui/textarea";
+import useNewPost from "~/hooks/useNewPost";
 
 const newPostSchema = z.object({
   post: z.string().min(1, "Post is required"),
@@ -31,9 +32,14 @@ function NewPostPage(): ReactElement {
     },
   });
 
-  function handleSubmit(values: z.infer<typeof newPostSchema>) {
+  const { mutateAsync: createNewPost } = useNewPost();
+
+  async function handleSubmit(values: z.infer<typeof newPostSchema>) {
     console.log("Form submitted with values:", values);
     // Here you would typically send the data to your API
+    createNewPost({
+      post: values.post,
+    });
   }
   return (
     <div>
@@ -54,7 +60,7 @@ function NewPostPage(): ReactElement {
                   <FormItem>
                     <FormLabel>Post</FormLabel>
                     <FormControl>
-                      <Input {...field} placeholder="Write your post here..." />
+                      <Textarea {...field} />
                     </FormControl>
                   </FormItem>
                 )}

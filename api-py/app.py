@@ -11,7 +11,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from authlib.jose import JsonWebKey
 
 from oauth_metadata import OauthMetadata
-from routes import api, auth, campaign, me
+from routes import api, auth, campaign, me, posts
 from routes.utils.postgres_connection import get_db
 from settings import get_settings
 from metrics import metrics_middleware, get_metrics
@@ -117,3 +117,4 @@ app.include_router(auth.router)
 app.include_router(me.router)
 app.include_router(api.router)
 app.include_router(campaign.router)
+app.include_router(posts.router)
